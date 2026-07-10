@@ -2,7 +2,7 @@
 worktree.py -- Git worktree isolation for parallel Builders.
 
 Each feature's B works in .evolve/worktrees/{slug} on branch
-{base}/{slug}, where {base} is the evolve/<tag> branch of the MAIN
+{base}--{slug}, where {base} is the evolve/<tag> branch of the MAIN
 working tree. All functions here must be called from the main working
 tree, not from inside a worktree.
 
@@ -42,7 +42,7 @@ def base_branch(evolve_dir: str) -> str:
 
 
 def feature_branch(evolve_dir: str, feature: str) -> str:
-    return f"{base_branch(evolve_dir)}/{feature_slug(feature)}"
+    return f"{base_branch(evolve_dir)}--{feature_slug(feature)}"
 
 
 def worktree_path(evolve_dir: str, feature: str) -> str:

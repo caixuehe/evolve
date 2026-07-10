@@ -34,7 +34,7 @@ def test_feature_slug_sanitizes():
 def test_branch_and_path_naming(tmp_path):
     evolve = _git_repo(tmp_path)
     assert base_branch(evolve) == "evolve/demo"
-    assert feature_branch(evolve, "F01 auth") == "evolve/demo/F01-auth"
+    assert feature_branch(evolve, "F01 auth") == "evolve/demo--F01-auth"
     assert worktree_path(evolve, "F01 auth").endswith(
         ".evolve/worktrees/F01-auth")
 
@@ -46,7 +46,7 @@ def test_create_and_remove_worktree(tmp_path):
     assert Path(wt["path"], "app.txt").exists()
     # branch exists
     r = subprocess.run(["git", "rev-parse", "--verify",
-                        "evolve/demo/F01-auth"],
+                        "evolve/demo--F01-auth"],
                        cwd=tmp_path, capture_output=True)
     assert r.returncode == 0
     # idempotent
@@ -57,7 +57,7 @@ def test_create_and_remove_worktree(tmp_path):
     remove_feature_worktree(evolve, "F01 auth")
     assert not Path(wt["path"]).exists()
     r = subprocess.run(["git", "rev-parse", "--verify",
-                        "evolve/demo/F01-auth"],
+                        "evolve/demo--F01-auth"],
                        cwd=tmp_path, capture_output=True)
     assert r.returncode != 0            # branch deleted too
 
@@ -66,5 +66,5 @@ def test_create_from_explicit_branch(tmp_path):
     evolve = _git_repo(tmp_path)
     _run(["git", "branch", "other-base"], tmp_path)
     wt = create_feature_worktree(evolve, "F02", from_branch="other-base")
-    assert wt["branch"] == "evolve/demo/F02"
+    assert wt["branch"] == "evolve/demo--F02"
     assert Path(wt["path"]).exists()
