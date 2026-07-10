@@ -174,3 +174,32 @@ def merge_feature(evolve_dir: str, feature: str, cascade_stages: list = None,
         return {"status": "merged", "detail": ""}
     finally:
         release_build_lock(evolve_dir, bl["token"])
+
+
+def prune_stale_worktrees(evolve_dir: str) -> list:
+    """Remove worktree debris: git-level pruning plus worktrees whose
+    feature is already completed. Returns list of removed slugs.
+
+    Safe to call every round: branches hold all committed state, so
+    removing a worktree loses at most a crashed B's uncommitted edits —
+    which is exactly the debris this cleans up.
+    """
+    from prepare import scan_all_features
+
+    root = _repo_root(evolve_dir)
+    _git(["worktree", "prune"], root)
+
+    removed = []
+    wt_root = Path(evolve_dir) / "worktrees"
+    if not wt_root.exists():
+        return removed
+
+    completed = {feature_slug(f["name"])
+                 for f in scan_all_features(evolve_dir)
+                 if f["state"] == "completed"}
+
+    for entry in wt_root.iterdir():
+        if entry.is_dir() and entry.name in completed:
+            remove_feature_worktree(evolve_dir, entry.name)
+            removed.append(entry.name)
+    return removed

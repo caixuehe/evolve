@@ -1400,6 +1400,14 @@ def acquire_lock(evolve_dir: str) -> dict:
     if not started_at_path.exists():
         started_at_path.write_text(str(lock_data["started"]))
 
+    # Best-effort worktree debris cleanup (crashed sessions leave none).
+    # Must never block the loop -- swallow everything.
+    try:
+        from worktree import prune_stale_worktrees
+        prune_stale_worktrees(evolve_dir)
+    except Exception:
+        pass
+
     return {"acquired": True, "reason": None, "owner": lock_data}
 
 
@@ -1431,3 +1439,6 @@ def release_lock(evolve_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 from cascade import load_cascade_config, run_cascade, DEFAULT_STAGE_TIMEOUT  # noqa: E402,F401
+from worktree import (create_feature_worktree, remove_feature_worktree,  # noqa: E402,F401
+                      merge_feature, prune_stale_worktrees, feature_slug,
+                      feature_branch, worktree_path, base_branch)

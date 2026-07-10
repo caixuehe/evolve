@@ -134,3 +134,35 @@ def test_merge_feature_conflict_aborts(tmp_path):
     assert result["status"] == "gate_fail"
     assert (tmp_path / "app.txt").read_text() == "main version\n"
     assert (tmp_path / ".evolve" / "F01" / "merge_conflict.md").exists()
+
+
+from worktree import prune_stale_worktrees
+
+
+def test_prune_removes_completed_feature_worktrees(tmp_path):
+    evolve = _git_repo(tmp_path)
+    # spec.md so scan_all_features sees the features
+    (Path(evolve) / "spec.md").write_text("- [ ] F01\n- [ ] F02\n")
+    header = "commit\tphase\tfeature\tscores\ttotal\tstatus\tsummary"
+    (Path(evolve) / "results.tsv").write_text(
+        header + "\n"
+        "a\teval\tF01\t9/9\t9.0\tpass\tdone\n"
+        "b\tbuild\tF02\t-\t-\tkeep\twip\n"
+    )
+    wt1 = create_feature_worktree(evolve, "F01")
+    wt2 = create_feature_worktree(evolve, "F02")
+
+    removed = prune_stale_worktrees(evolve)
+    assert "F01" in removed
+    assert not Path(wt1["path"]).exists()      # completed -> pruned
+    assert Path(wt2["path"]).exists()          # in progress -> kept
+
+
+def test_acquire_lock_prunes_best_effort(tmp_path):
+    # acquire_lock on a NON-git dir must still work (prune errors swallowed)
+    from prepare import acquire_lock, release_lock
+    evolve = tmp_path / ".evolve"
+    evolve.mkdir()
+    lock = acquire_lock(str(evolve))
+    assert lock["acquired"] is True
+    release_lock(str(evolve))
