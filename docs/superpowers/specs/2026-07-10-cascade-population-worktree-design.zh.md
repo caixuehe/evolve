@@ -79,7 +79,7 @@
 ## 第二部分 —— Worktree 隔离（`worktree.py`）
 
 - 每个 feature 的 B 在 `.evolve/worktrees/{feature}` 工作，对应分支
-  `evolve/<tag>/{feature}`，由
+  `evolve/<tag>--{feature}`（兄弟 ref：git 不允许在已有分支名下嵌套分支），由
   `create_feature_worktree(evolve_dir, feature) -> path` 创建。
 - **build_lock 语义变更：** 不再是"同一时间只有一个 B"。它现在只串行化
   真正的临界区 —— 合入 `evolve/<tag>`。多个 B 可跨 feature 并行（并发上限
@@ -97,9 +97,10 @@
   `allocate_slot(n) -> dict`（第 n 个并行实例的环境变量覆盖）；
   `web_app.py` 演示按 slot 偏移 PORT。未实现该函数的 adapter 视为无冲突
   （文档/教学类 adapter）。
-- **泄漏清理：** `acquire_lock()` 会清理陈旧 worktree 和
-  `evolve/<tag>/*` 分支 —— 凡 feature 已 `completed` 或锁已过期的
-  （崩溃的 session 不留残骸）。
+- **泄漏清理：** `acquire_lock()` 尽力清理陈旧 worktree：completed
+  feature 的 worktree+分支**只有在分支已合入 base**（`git merge-base
+  --is-ancestor`）时才删除 —— 已 pass 但未合并的分支必须在崩溃后幸存，
+  等 O 来合并。逐项隔离失败（一个坏 worktree 不会中断其余清理）。
 
 ## 第三部分 —— 种群分支（`population.py`）+ 受门控的 forced_pass
 
@@ -120,7 +121,7 @@ BLOCKER **之前**。建议 #3 检查不再直接标记 BLOCKER，而是使 feat
 
 - `spawn_candidates(evolve_dir, feature, n=3) -> list[dict]` 从 feature 当前
   分支派生 N 个 worktree `.evolve/worktrees/{feature}-cand{i}`，对应分支
-  `evolve/<tag>/cand/{feature}/{i}`。每个候选的 `strategy.md` 以一个
+  `evolve/<tag>--{feature}-cand{i}`。每个候选的 `strategy.md` 以一个
   **彼此不同的方案**作为种子，来源是 Mentor 的假设和 C 未尝试过的 Pivot
   选项；种子由 O 写入。
 - O 并行派出 N 条 B→C 链，每条对应一个候选 worktree（复用第二部分的

@@ -872,7 +872,7 @@ git push
 - Test: `tests/test_worktree.py`
 
 **Interfaces:**
-- Produces: `feature_slug(feature) -> str`; `base_branch(evolve_dir) -> str`; `feature_branch(evolve_dir, feature) -> str` (`"{base}/{slug}"`); `worktree_path(evolve_dir, feature) -> str` (`"{evolve_dir}/worktrees/{slug}"`); `create_feature_worktree(evolve_dir, feature, from_branch=None) -> {"path", "branch", "created"}`; `remove_feature_worktree(evolve_dir, feature, delete_branch=True)`. Assumption (documented): these are called from the main working tree, which sits on the `evolve/<tag>` branch.
+- Produces: `feature_slug(feature) -> str`; `base_branch(evolve_dir) -> str`; `feature_branch(evolve_dir, feature) -> str` (`"{base}--{slug}"` — sibling ref; git cannot create `X/Y` when branch `X` exists); `worktree_path(evolve_dir, feature) -> str` (`"{evolve_dir}/worktrees/{slug}"`); `create_feature_worktree(evolve_dir, feature, from_branch=None) -> {"path", "branch", "created"}`; `remove_feature_worktree(evolve_dir, feature, delete_branch=True)`. Assumption (documented): these are called from the main working tree, which sits on the `evolve/<tag>` branch.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -914,7 +914,7 @@ def test_feature_slug_sanitizes():
 def test_branch_and_path_naming(tmp_path):
     evolve = _git_repo(tmp_path)
     assert base_branch(evolve) == "evolve/demo"
-    assert feature_branch(evolve, "F01 auth") == "evolve/demo/F01-auth"
+    assert feature_branch(evolve, "F01 auth") == "evolve/demo--F01-auth"
     assert worktree_path(evolve, "F01 auth").endswith(
         ".evolve/worktrees/F01-auth")
 
@@ -926,7 +926,7 @@ def test_create_and_remove_worktree(tmp_path):
     assert Path(wt["path"], "app.txt").exists()
     # branch exists
     r = subprocess.run(["git", "rev-parse", "--verify",
-                        "evolve/demo/F01-auth"],
+                        "evolve/demo--F01-auth"],
                        cwd=tmp_path, capture_output=True)
     assert r.returncode == 0
     # idempotent
@@ -937,7 +937,7 @@ def test_create_and_remove_worktree(tmp_path):
     remove_feature_worktree(evolve, "F01 auth")
     assert not Path(wt["path"]).exists()
     r = subprocess.run(["git", "rev-parse", "--verify",
-                        "evolve/demo/F01-auth"],
+                        "evolve/demo--F01-auth"],
                        cwd=tmp_path, capture_output=True)
     assert r.returncode != 0            # branch deleted too
 
@@ -946,7 +946,7 @@ def test_create_from_explicit_branch(tmp_path):
     evolve = _git_repo(tmp_path)
     _run(["git", "branch", "other-base"], tmp_path)
     wt = create_feature_worktree(evolve, "F02", from_branch="other-base")
-    assert wt["branch"] == "evolve/demo/F02"
+    assert wt["branch"] == "evolve/demo--F02"
     assert Path(wt["path"]).exists()
 ```
 
@@ -963,7 +963,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'worktree'`
 worktree.py -- Git worktree isolation for parallel Builders.
 
 Each feature's B works in .evolve/worktrees/{slug} on branch
-{base}/{slug}, where {base} is the evolve/<tag> branch of the MAIN
+{base}--{slug}, where {base} is the evolve/<tag> branch of the MAIN
 working tree. All functions here must be called from the main working
 tree, not from inside a worktree.
 
@@ -1003,7 +1003,7 @@ def base_branch(evolve_dir: str) -> str:
 
 
 def feature_branch(evolve_dir: str, feature: str) -> str:
-    return f"{base_branch(evolve_dir)}/{feature_slug(feature)}"
+    return f"{base_branch(evolve_dir)}--{feature_slug(feature)}"
 
 
 def worktree_path(evolve_dir: str, feature: str) -> str:
@@ -1913,8 +1913,12 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
       4. else outcome "none" (forced_pass gate opens; see can_force_pass).
 
     Marks branching.json completed and records winner_outcome.
-    On "adopt": resets the incumbent feature branch to the winner and
-    appends a status=reset row so fail counting restarts.
+    On "pass" AND "adopt": resets the incumbent feature branch to the
+    winner's branch — so the standard merge_feature(feature) path works
+    afterwards and EVERY candidate branch can be safely cleaned up here
+    (otherwise a pass-winner's branch would be deleted before O merges it).
+    On "adopt" additionally appends a status=reset row so fail counting
+    restarts.
     """
     import csv as _csv
     from prepare import append_result
@@ -1968,10 +1972,14 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
     state["winner"] = cand["feature_id"] if cand else None
     _write_branching_state(evolve_dir, feature, state)
 
-    if outcome == "adopt":
+    if outcome in ("pass", "adopt"):
+        # Point the incumbent feature branch at the winner. After this,
+        # the winner's commits live on the feature branch, so all
+        # candidate branches (including the winner's) are safe to delete
+        # below, and O merges via the standard merge_feature(feature).
         root = _repo_root(evolve_dir)
         incumbent_branch = feature_branch(evolve_dir, feature)
-        if _git(["rev-parse", "--verify", incumbent_branch],
+        if _git(["rev-parse", "--verify", "refs/heads/" + incumbent_branch],
                 root).returncode == 0:
             # Feature worktree must not hold the branch while we move it.
             remove_feature_worktree(evolve_dir, feature,
@@ -1979,16 +1987,16 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
             _git(["branch", "-f", incumbent_branch, cand["branch"]], root)
         else:
             _git(["branch", incumbent_branch, cand["branch"]], root)
-        append_result(str(tsv), {
-            "commit": "-", "phase": "build", "feature": feature,
-            "scores": "-", "total": "-", "status": "reset",
-            "summary": f"adopted candidate {cand['cand_id']} lineage "
-                       f"({cand['branch']})",
-        })
+        if outcome == "adopt":
+            append_result(str(tsv), {
+                "commit": "-", "phase": "build", "feature": feature,
+                "scores": "-", "total": "-", "status": "reset",
+                "summary": f"adopted candidate {cand['cand_id']} lineage "
+                           f"({cand['branch']})",
+            })
 
-    # Loser cleanup: remove all candidate worktrees except an adopted
-    # winner's branch source (its commits now live on the incumbent branch,
-    # so its worktree can go too).
+    # Candidate cleanup: every candidate worktree+branch goes. Safe even
+    # for the winner — its commits now live on the incumbent branch.
     for c in state["candidates"]:
         cand_name = f"{feature_slug(feature)}-cand{c['cand_id']}"
         remove_feature_worktree(evolve_dir, cand_name)
@@ -1999,7 +2007,7 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
             "detail": f"winner_outcome={outcome}"}
 ```
 
-Note for the runtime flow (documented in Task 13's loop.md edits, not code): on `outcome == "pass"` O merges the winning branch via `merge_feature(evolve_dir, feature, branch=cand["branch"])` and appends the parent's pass row.
+Note for the runtime flow (documented in Task 14's loop.md edits, not code): on `outcome == "pass"` the feature branch already points at the winner, so O merges via the standard `merge_feature(evolve_dir, feature, cascade_stages=stages)` and appends the parent's pass row. The `branch=` override on merge_feature stays available for other uses but is not needed here.
 
 - [ ] **Step 4: Run the full suite**
 
@@ -2320,8 +2328,9 @@ When every candidate has an eval row, close the round:
 ```python
 result = select_candidate(".evolve", feat["name"])
 if result["outcome"] == "pass":
-    # merge the winning candidate branch under the parent feature's name
-    merge_feature(".evolve", feat["name"], branch=winner_branch)
+    # select_candidate already reset the feature branch to the winner —
+    # merge through the standard integration gate:
+    merge_feature(".evolve", feat["name"], cascade_stages=stages)
     # then append the parent's eval/pass row
 elif result["outcome"] == "adopt":
     # lineage was reset to the best candidate; feature returns to needs_build
@@ -2391,7 +2400,7 @@ cannot run against a broken build.
 
 ```markdown
 1. **B parallel via worktrees**: each feature's B works in
-   `.evolve/worktrees/{slug}` on branch `evolve/<tag>/{slug}`; build_lock
+   `.evolve/worktrees/{slug}` on branch `evolve/<tag>--{slug}`; build_lock
    only serializes merges into evolve/<tag>
 ```
 
