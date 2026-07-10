@@ -111,9 +111,12 @@ stable. prepare.py (1,340 lines) must not grow materially.
   `allocate_slot(n) -> dict` (env overrides for parallel instance n);
   `web_app.py` demonstrates per-slot PORT offsets. Adapters without it are
   assumed conflict-free (docs/teaching adapters).
-- **Leak cleanup:** `acquire_lock()` prunes stale worktrees and
-  `evolve/<tag>--*` branches whose feature is `completed` or whose lock is
-  expired (crashed sessions leave no debris).
+- **Leak cleanup:** `acquire_lock()` best-effort prunes stale worktrees:
+  a completed feature's worktree+branch is removed ONLY when the branch is
+  already merged into the base (`git merge-base --is-ancestor`) — an
+  unmerged pass must survive a crash so the orchestrator can still merge
+  it. Per-entry failures are isolated (one bad worktree never aborts the
+  rest).
 
 ## Part 3 — Population branching (`population.py`) + gated forced_pass
 

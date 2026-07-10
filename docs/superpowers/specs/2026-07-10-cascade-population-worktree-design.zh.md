@@ -97,9 +97,10 @@
   `allocate_slot(n) -> dict`（第 n 个并行实例的环境变量覆盖）；
   `web_app.py` 演示按 slot 偏移 PORT。未实现该函数的 adapter 视为无冲突
   （文档/教学类 adapter）。
-- **泄漏清理：** `acquire_lock()` 会清理陈旧 worktree 和
-  `evolve/<tag>--*` 分支 —— 凡 feature 已 `completed` 或锁已过期的
-  （崩溃的 session 不留残骸）。
+- **泄漏清理：** `acquire_lock()` 尽力清理陈旧 worktree：completed
+  feature 的 worktree+分支**只有在分支已合入 base**（`git merge-base
+  --is-ancestor`）时才删除 —— 已 pass 但未合并的分支必须在崩溃后幸存，
+  等 O 来合并。逐项隔离失败（一个坏 worktree 不会中断其余清理）。
 
 ## 第三部分 —— 种群分支（`population.py`）+ 受门控的 forced_pass
 
