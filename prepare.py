@@ -1293,28 +1293,18 @@ def acquire_feature_lock(evolve_dir: str, feature: str, agent: str) -> dict:
     Acquire per-feature lock for B or C agent.
     Uses atomic file creation to prevent TOCTOU races.
 
-    Also acquires global build_lock if agent is "B".
+    Per-feature isolation only: this does NOT touch the global build_lock.
+    B and C agents alike take only the per-feature lock, so multiple B
+    agents can run in parallel across different features (each in its own
+    worktree). The build_lock is merge_feature's concern — it serializes
+    only the true critical section (merging a feature branch into
+    evolve/<tag>), not feature dispatch.
     Returns {"acquired": True/False, "reason": ..., "token": ...}.
     """
     # Sanitize feature name to prevent path traversal
     if ".." in feature or feature.startswith("/"):
         return {"acquired": False, "reason": f"Invalid feature name: {feature!r}",
                 "token": None}
-
-    build_token = None
-    if agent == "B":
-        bl = acquire_build_lock(evolve_dir)
-        if not bl["acquired"]:
-            return {"acquired": False, "reason": bl["reason"], "token": None}
-        build_token = bl["token"]
-        # Update build_lock with feature info
-        lock_path = Path(evolve_dir) / "build_lock"
-        try:
-            data = json.loads(lock_path.read_text())
-            data["feature"] = feature
-            lock_path.write_text(json.dumps(data))
-        except (json.JSONDecodeError, OSError):
-            pass
 
     feat_dir = Path(evolve_dir) / feature
     feat_dir.mkdir(parents=True, exist_ok=True)
@@ -1326,8 +1316,6 @@ def acquire_feature_lock(evolve_dir: str, feature: str, agent: str) -> dict:
             data = json.loads(lock_path.read_text())
             elapsed = time.time() - data.get("heartbeat", 0)
             if elapsed < LOCK_STALE_SECONDS:
-                if build_token:
-                    release_build_lock(evolve_dir, build_token)
                 return {
                     "acquired": False,
                     "reason": f"{data.get('agent', '?')} active on {feature}",
@@ -1344,7 +1332,6 @@ def acquire_feature_lock(evolve_dir: str, feature: str, agent: str) -> dict:
         os.write(fd, json.dumps({
             "pid": os.getpid(),
             "token": token,
-            "build_token": build_token,
             "agent": agent,
             "feature": feature,
             "heartbeat": time.time(),
@@ -1352,8 +1339,6 @@ def acquire_feature_lock(evolve_dir: str, feature: str, agent: str) -> dict:
         os.close(fd)
         return {"acquired": True, "reason": None, "token": token}
     except FileExistsError:
-        if build_token:
-            release_build_lock(evolve_dir, build_token)
         return {
             "acquired": False,
             "reason": f"Lost feature lock race on {feature}",
@@ -1364,7 +1349,11 @@ def acquire_feature_lock(evolve_dir: str, feature: str, agent: str) -> dict:
 def release_feature_lock(evolve_dir: str, feature: str, token: str = None) -> None:
     """
     Release per-feature lock. Verifies ownership via token if provided.
-    Also releases build_lock if this was a B agent (using stored build_token).
+
+    Backward compat: lock files written by older sessions may still carry a
+    stored build_token (from when acquire_feature_lock took the global
+    build_lock for agent "B"). If present, it is released here too. New
+    locks written by the current acquire_feature_lock never set build_token.
     """
     feat_lock = Path(evolve_dir) / feature / "lock"
     if not feat_lock.exists():

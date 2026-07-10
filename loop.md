@@ -36,9 +36,9 @@ Call `release_lock(".evolve")` when done.
 Lock auto-expires after 2 minutes if session crashes.
 
 **Per-feature locks** (used by O when dispatching B/C):
-- `acquire_feature_lock(".evolve", "F01", "B")` — acquires build_lock + feature lock (B exclusive)
+- `acquire_feature_lock(".evolve", "F01", "B")` — acquires feature lock (B parallel across features; build_lock is only taken by merge_feature during integration)
 - `acquire_feature_lock(".evolve", "F02", "C")` — acquires feature lock only (C parallel)
-- `release_feature_lock(".evolve", "F01", "B")` — releases feature lock + build_lock
+- `release_feature_lock(".evolve", "F01", "B")` — releases feature lock
 - `release_feature_lock(".evolve", "F02", "C")` — releases feature lock only
 
 ---
@@ -226,7 +226,7 @@ Override the model / sandbox / timeout via env vars if needed:
 - `EVOLVE_CODEX_SANDBOX` (default `workspace-write`; set to `danger-full-access` only if absolutely required)
 - `EVOLVE_DISPATCH_C_TIMEOUT` (default 1200s / 20 min)
 
-### 5. Dispatch B — exclusive via codex CLI
+### 5. Dispatch B — parallel via codex CLI (one worktree per feature)
 
 B agents run in PARALLEL, one per feature, each in its own git worktree
 (created via `create_feature_worktree(".evolve", feat["name"])`; B's
@@ -243,6 +243,7 @@ result = merge_feature(".evolve", feat["name"], cascade_stages=stages)
 # "merged"    -> feature completed, worktree cleaned up
 # "gate_fail" -> merge reverted; see .evolve/{feature}/merge_conflict.md;
 #                feature returns to needs_build
+# "locked"    -> another merge in progress; retry next round
 ```
 
 ```python
@@ -278,7 +279,7 @@ for feat in start_ready:
 
 ### 7. After subagent completes
 
-- B agent: `release_feature_lock(".evolve", feat, "B")` (releases build_lock + feature lock)
+- B agent: `release_feature_lock(".evolve", feat, "B")` (releases feature lock)
 - C agent: `release_feature_lock(".evolve", feat, "C")` (releases feature lock only)
 - Next round's Hook will update manifest.md automatically. O just reads it again.
 
@@ -559,6 +560,6 @@ Output report to user, stop the loop.
 | dispatch_B.md | - | write (via code) | read | - |
 | dispatch_C.md | - | write (via code) | - | read |
 | eval_codex.md | - | - | - | write |
-| cascade_fail.md | read | read | read | write |
+| cascade_fail.md | read/write (via merge_feature) | read | read | write |
 | merge_conflict.md | write (via merge_feature) | read | read | - |
 | branching.json | write (via population fns) | read | - | - |

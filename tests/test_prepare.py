@@ -1559,20 +1559,33 @@ def test_acquire_feature_lock_c(tmp_path):
     assert (tmp_path / "F01" / "lock").exists()
 
 
-def test_acquire_feature_lock_b_acquires_build_lock(tmp_path):
-    result = acquire_feature_lock(str(tmp_path), "F01", "B")
-    assert result["acquired"] is True
-    assert (tmp_path / "build_lock").exists()
-    assert (tmp_path / "F01" / "lock").exists()
+def test_acquire_feature_lock_b_does_not_take_build_lock(tmp_path):
+    lock = acquire_feature_lock(str(tmp_path), "F01", "B")
+    assert lock["acquired"] is True
+    assert not (tmp_path / "build_lock").exists()
+    release_feature_lock(str(tmp_path), "F01", lock["token"])
 
 
-def test_acquire_feature_lock_b_blocked_by_build_lock(tmp_path):
-    (tmp_path / "build_lock").write_text(json.dumps({
-        "pid": 12345, "feature": "F02", "token": "other",
-        "heartbeat": time.time()
-    }))
-    result = acquire_feature_lock(str(tmp_path), "F01", "B")
-    assert result["acquired"] is False
+def test_parallel_b_agents_on_different_features(tmp_path):
+    l1 = acquire_feature_lock(str(tmp_path), "F01", "B")
+    l2 = acquire_feature_lock(str(tmp_path), "F02", "B")
+    assert l1["acquired"] is True
+    assert l2["acquired"] is True          # B no longer globally exclusive
+    # same feature still exclusive
+    l3 = acquire_feature_lock(str(tmp_path), "F01", "B")
+    assert l3["acquired"] is False
+    release_feature_lock(str(tmp_path), "F01", l1["token"])
+    release_feature_lock(str(tmp_path), "F02", l2["token"])
+
+
+def test_b_not_blocked_by_merge_build_lock(tmp_path):
+    # merge_feature holds build_lock; B dispatch must not be blocked by it
+    bl = acquire_build_lock(str(tmp_path))
+    assert bl["acquired"] is True
+    lock = acquire_feature_lock(str(tmp_path), "F01", "B")
+    assert lock["acquired"] is True
+    release_feature_lock(str(tmp_path), "F01", lock["token"])
+    release_build_lock(str(tmp_path), bl["token"])
 
 
 def test_acquire_feature_lock_path_traversal(tmp_path):
@@ -1581,11 +1594,21 @@ def test_acquire_feature_lock_path_traversal(tmp_path):
     assert "Invalid" in result["reason"]
 
 
-def test_release_feature_lock_b_releases_build_lock(tmp_path):
-    result = acquire_feature_lock(str(tmp_path), "F01", "B")
-    assert (tmp_path / "build_lock").exists()
-    release_feature_lock(str(tmp_path), "F01", result["token"])
-    assert not (tmp_path / "F01" / "lock").exists()
+def test_release_feature_lock_backward_compat_releases_stored_build_token(tmp_path):
+    """Old-format lock files (written by pre-fix sessions) may still carry a
+    build_token. release_feature_lock must still release it for backward
+    compatibility, even though current acquire_feature_lock never sets one.
+    """
+    feat_dir = tmp_path / "F01"
+    feat_dir.mkdir()
+    bl = acquire_build_lock(str(tmp_path))
+    assert bl["acquired"] is True
+    (feat_dir / "lock").write_text(json.dumps({
+        "pid": os.getpid(), "token": "feat-token", "build_token": bl["token"],
+        "agent": "B", "feature": "F01", "heartbeat": time.time(),
+    }))
+    release_feature_lock(str(tmp_path), "F01", "feat-token")
+    assert not (feat_dir / "lock").exists()
     assert not (tmp_path / "build_lock").exists()
 
 
@@ -1594,7 +1617,6 @@ def test_release_feature_lock_wrong_token(tmp_path):
     acquire_feature_lock(str(tmp_path), "F01", "B")
     release_feature_lock(str(tmp_path), "F01", "wrong-token")
     assert (tmp_path / "F01" / "lock").exists()  # Lock preserved
-    assert (tmp_path / "build_lock").exists()     # Build lock preserved
 
 
 def test_release_feature_lock_c_keeps_build_lock(tmp_path):
