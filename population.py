@@ -163,13 +163,17 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
          only if it beats the incumbent's last min-dim;
       4. else outcome "none" (forced_pass gate opens; see can_force_pass).
 
-    Marks branching.json completed and records winner_outcome.
     On "pass" AND "adopt": resets the incumbent feature branch to the
-    winner's branch — so the standard merge_feature(feature) path works
-    afterwards and EVERY candidate branch can be safely cleaned up here
-    (otherwise a pass-winner's branch would be deleted before O merges it).
-    On "adopt" additionally appends a status=reset row so fail counting
-    restarts.
+    winner's branch BEFORE marking branching.json completed — so the
+    standard merge_feature(feature) path works afterwards and EVERY
+    candidate branch can be safely cleaned up here (otherwise a
+    pass-winner's branch would be deleted before O merges it). If the
+    branch reset fails, this raises RuntimeError and leaves
+    branching.json un-completed (round stays resumable, no candidate
+    branch is deleted) instead of silently orphaning the winner's commits.
+    Only once the reset has succeeded are branching.json marked completed
+    and winner_outcome recorded. On "adopt" additionally appends a
+    status=reset row so fail counting restarts.
     """
     import csv as _csv
     from prepare import append_result
@@ -206,7 +210,7 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
             continue
         try:
             total = float(last.get("total", "0"))
-        except ValueError:
+        except (ValueError, TypeError):
             total = 0.0
         if best is None or (min_dim, total) > (best[0], best[1]):
             best = (min_dim, total, cand)
@@ -218,16 +222,18 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
     outcome = winner[0] if winner else "none"
     cand = winner[1] if winner else None
 
-    state["completed"] = True
-    state["winner_outcome"] = outcome
-    state["winner"] = cand["feature_id"] if cand else None
-    _write_branching_state(evolve_dir, feature, state)
-
     if outcome in ("pass", "adopt"):
         # Point the incumbent feature branch at the winner. After this,
         # the winner's commits live on the feature branch, so all
         # candidate branches (including the winner's) are safe to delete
         # below, and O merges via the standard merge_feature(feature).
+        #
+        # This MUST happen (and succeed) before branching.json is marked
+        # completed and before candidate cleanup runs: if the branch
+        # reset fails silently, the cleanup loop below would delete every
+        # candidate branch — including the winner's — orphaning its
+        # commits. Raising here leaves branching.json un-completed, so
+        # the round stays resumable and no candidate branch is touched.
         root = _repo_root(evolve_dir)
         incumbent_branch = feature_branch(evolve_dir, feature)
         if _git(["rev-parse", "--verify", "refs/heads/" + incumbent_branch],
@@ -235,16 +241,26 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
             # Feature worktree must not hold the branch while we move it.
             remove_feature_worktree(evolve_dir, feature,
                                     delete_branch=False)
-            _git(["branch", "-f", incumbent_branch, cand["branch"]], root)
+            proc = _git(["branch", "-f", incumbent_branch, cand["branch"]],
+                        root)
         else:
-            _git(["branch", incumbent_branch, cand["branch"]], root)
-        if outcome == "adopt":
-            append_result(str(tsv), {
-                "commit": "-", "phase": "build", "feature": feature,
-                "scores": "-", "total": "-", "status": "reset",
-                "summary": f"adopted candidate {cand['cand_id']} lineage "
-                           f"({cand['branch']})",
-            })
+            proc = _git(["branch", incumbent_branch, cand["branch"]], root)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"git branch reset failed: {proc.stderr.strip()}")
+
+    state["completed"] = True
+    state["winner_outcome"] = outcome
+    state["winner"] = cand["feature_id"] if cand else None
+    _write_branching_state(evolve_dir, feature, state)
+
+    if outcome == "adopt":
+        append_result(str(tsv), {
+            "commit": "-", "phase": "build", "feature": feature,
+            "scores": "-", "total": "-", "status": "reset",
+            "summary": f"adopted candidate {cand['cand_id']} lineage "
+                       f"({cand['branch']})",
+        })
 
     # Candidate cleanup: every candidate worktree+branch goes. Safe even
     # for the winner — its commits now live on the incumbent branch.

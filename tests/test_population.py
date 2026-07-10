@@ -167,6 +167,35 @@ def test_select_candidate_none_when_no_improvement(tmp_path):
     assert state["winner_outcome"] == "none"
 
 
+def test_select_candidate_pass_resets_existing_incumbent(tmp_path):
+    from worktree import create_feature_worktree, feature_branch
+    evolve = _git_evolve(tmp_path, rows=[
+        ["a", "eval", "F01", "6/6", "6.0", "fail", "incumbent"],
+    ])
+    # incumbent worktree+branch exist (normal pre-branching build activity)
+    create_feature_worktree(evolve, "F01")
+    cands = spawn_candidates(evolve, "F01", ["a1", "a2", "a3"])
+    # give cand2 a distinct commit so the reset is observable
+    cand2 = cands[1]
+    p = Path(cand2["path"]) / "winner.txt"
+    p.write_text("winning work\n")
+    _run(["git", "add", "."], cand2["path"])
+    _run(["git", "commit", "-m", "feat: winning approach"], cand2["path"])
+    cand2_tip = _run(["git", "rev-parse", "HEAD"], cand2["path"]).stdout.strip()
+    (Path(evolve) / "results.tsv").open("a").write(
+        "e\teval\tF01@cand2\t9/9\t9.0\tpass\tthreshold met\n")
+
+    result = select_candidate(evolve, "F01")
+    assert result["outcome"] == "pass"
+    # incumbent branch now points at the winner's tip
+    branch = feature_branch(evolve, "F01")
+    tip = _run(["git", "rev-parse", branch], tmp_path).stdout.strip()
+    assert tip == cand2_tip
+    # all candidate worktrees cleaned up
+    for c in cands:
+        assert not Path(c["path"]).exists()
+
+
 def test_scan_resets_fail_count_on_reset_row(tmp_path):
     from prepare import scan_all_features
     rows = (_fail_rows("F01", 4) +
