@@ -220,12 +220,31 @@ _RUBRIC_RE = re.compile(r'^(\d+)\s*:\s*(.+)$')
 # Trajectory Analysis
 # ---------------------------------------------------------------------------
 
+def _pairwise_net(pw: str):
+    """Parse 'log:better/ui:same/db:worse' -> net int (+1 per better,
+    -1 per worse). Returns None if unparseable/absent."""
+    if not pw or pw.strip() in ("-", ""):
+        return None
+    net, seen = 0, False
+    for part in pw.split("/"):
+        verdict = part.split(":")[-1].strip().lower()
+        if verdict == "better":
+            net += 1
+            seen = True
+        elif verdict == "worse":
+            net -= 1
+            seen = True
+        elif verdict == "same":
+            seen = True
+    return net if seen else None
+
+
 def analyze_trajectory(results_tsv: str, feature: str, window: int = 3) -> dict:
     """
     Extract recent eval scores for a feature, determine trend.
 
     Returns:
-        {"trend": "rising"|"flat"|"falling"|"insufficient",
+        {"trend": "rising"|"flat"|"falling"|"insufficient"|"noisy",
          "scores": [float, ...], "rounds": int, "latest": float}
 
     Logic:
@@ -237,38 +256,59 @@ def analyze_trajectory(results_tsv: str, feature: str, window: int = 3) -> dict:
     """
     path = Path(results_tsv)
     if not path.exists():
-        return {"trend": "insufficient", "scores": [], "rounds": 0, "latest": 0.0}
+        return {"trend": "insufficient", "scores": [], "rounds": 0,
+                "latest": 0.0}
 
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
 
-    scores = []
+    entries = []   # (score, pairwise_net_or_None)
     for r in rows:
-        if r.get("phase") == "eval" and r.get("feature") == feature:
-            try:
-                scores.append(float(r["total"]))
-            except (ValueError, TypeError, KeyError):
-                continue
+        if r.get("phase") != "eval" or r.get("feature") != feature:
+            continue
+        if r.get("status") == "cascade_fail":
+            continue   # void round: broken build, not a real judgment
+        try:
+            score = float(r["total"])
+        except (ValueError, TypeError, KeyError):
+            continue
+        entries.append((score, _pairwise_net(r.get("pairwise", ""))))
 
+    scores = [e[0] for e in entries]
     if len(scores) < window:
-        return {
-            "trend": "insufficient",
-            "scores": scores,
-            "rounds": len(scores),
-            "latest": scores[-1] if scores else 0.0,
-        }
+        return {"trend": "insufficient", "scores": scores,
+                "rounds": len(scores),
+                "latest": scores[-1] if scores else 0.0}
 
-    recent = scores[-window:]
-    diff = recent[-1] - recent[0]
+    recent = entries[-window:]
+    recent_scores = [e[0] for e in recent]
+    diff = recent_scores[-1] - recent_scores[0]
 
-    if diff > 0.5:
-        trend = "rising"
-    elif diff < -0.5:
-        trend = "falling"
+    # Pairwise verdicts are round-vs-previous-round; the first window row's
+    # verdict compares against a pre-window round, so use rounds 2..window.
+    nets = [e[1] for e in recent[1:]]
+    if all(n is not None for n in nets) and nets:
+        pairwise_sum = sum(nets)
+        contradiction = (diff > 0.5 and pairwise_sum < 0) or \
+                        (diff < -0.5 and pairwise_sum > 0)
+        if contradiction:
+            trend = "noisy"
+        elif pairwise_sum > 0:
+            trend = "rising"
+        elif pairwise_sum < 0:
+            trend = "falling"
+        else:
+            trend = "flat"
     else:
-        trend = "flat"
+        if diff > 0.5:
+            trend = "rising"
+        elif diff < -0.5:
+            trend = "falling"
+        else:
+            trend = "flat"
 
-    return {"trend": trend, "scores": recent, "rounds": len(scores), "latest": recent[-1]}
+    return {"trend": trend, "scores": recent_scores,
+            "rounds": len(scores), "latest": recent_scores[-1]}
 
 
 # ---------------------------------------------------------------------------

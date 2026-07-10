@@ -1667,3 +1667,74 @@ def test_append_result_pairwise_survives_second_append(tmp_path):
     })
     rows = Path(path).read_text().strip().split("\n")
     assert rows[2].rstrip("\r").split("\t")[-1] == "log:better"
+
+
+# ---------------------------------------------------------------------------
+# analyze_trajectory: pairwise preference, noise detection, cascade_fail skip
+# ---------------------------------------------------------------------------
+
+def _make_tsv8(rows):
+    """Write an 8-column results.tsv into a temp file, return its path."""
+    header = "\t".join(HEADER_FIELDS)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv",
+                                     delete=False) as f:
+        f.write(header + "\n")
+        for r in rows:
+            f.write("\t".join(r) + "\n")
+        return f.name
+
+
+def test_analyze_trajectory_prefers_pairwise(tmp_path):
+    # Scores flat (diff <= 0.5 would say "flat") but pairwise says better
+    path = _make_tsv8([
+        ["a", "eval", "F01", "7/7", "7.0", "fail", "r1", "log:same/ui:same"],
+        ["b", "eval", "F01", "7/7", "7.1", "fail", "r2", "log:better/ui:same"],
+        ["c", "eval", "F01", "7/7", "7.2", "fail", "r3", "log:better/ui:better"],
+    ])
+    try:
+        t = analyze_trajectory(path, "F01")
+        assert t["trend"] == "rising"
+    finally:
+        os.unlink(path)
+
+
+def test_analyze_trajectory_contradiction_is_noisy(tmp_path):
+    # Score jumped +1.5 but pairwise majority says worse -> judge noise
+    path = _make_tsv8([
+        ["a", "eval", "F01", "7/7", "7.0", "fail", "r1", "log:same/ui:same"],
+        ["b", "eval", "F01", "7/7", "7.2", "fail", "r2", "log:worse/ui:same"],
+        ["c", "eval", "F01", "9/8", "8.5", "fail", "r3", "log:worse/ui:worse"],
+    ])
+    try:
+        t = analyze_trajectory(path, "F01")
+        assert t["trend"] == "noisy"
+    finally:
+        os.unlink(path)
+
+
+def test_analyze_trajectory_skips_cascade_fail_rows(tmp_path):
+    path = _make_tsv8([
+        ["a", "eval", "F01", "7/7", "7.0", "fail", "r1", "-"],
+        ["b", "eval", "F01", "-", "0", "cascade_fail", "build broke", "-"],
+        ["c", "eval", "F01", "7/8", "7.5", "fail", "r2", "-"],
+        ["d", "eval", "F01", "8/8", "8.0", "fail", "r3", "-"],
+    ])
+    try:
+        t = analyze_trajectory(path, "F01")
+        assert 0.0 not in t["scores"]           # cascade_fail row excluded
+        assert t["trend"] == "rising"           # 7.0 -> 8.0 over window
+    finally:
+        os.unlink(path)
+
+
+def test_analyze_trajectory_no_pairwise_falls_back_to_scores(tmp_path):
+    # Old 7-col behavior unchanged
+    path = _make_tsv8([
+        ["a", "eval", "F01", "7/7", "7.0", "fail", "r1", "-"],
+        ["b", "eval", "F01", "7/7", "7.1", "fail", "r2", "-"],
+        ["c", "eval", "F01", "7/7", "7.2", "fail", "r3", "-"],
+    ])
+    try:
+        assert analyze_trajectory(path, "F01")["trend"] == "flat"
+    finally:
+        os.unlink(path)
