@@ -1649,3 +1649,21 @@ def _make_tsv_at(base_path, rows):
         for row in rows:
             f.write('\t'.join(str(row.get(h, '-')) for h in HEADER_FIELDS) + '\n')
     return str(tsv_path)
+
+
+def test_append_result_pairwise_survives_second_append(tmp_path):
+    # Regression: header written by DictWriter ends in \r\n; sniffing it
+    # back must not leave a trailing \r on the last fieldname.
+    path = str(tmp_path / "results.tsv")
+    append_result(path, {
+        "commit": "a", "phase": "eval", "feature": "F01",
+        "scores": "7/7", "total": "7.0", "status": "fail",
+        "summary": "first", "pairwise": "log:same",
+    })
+    append_result(path, {
+        "commit": "b", "phase": "eval", "feature": "F01",
+        "scores": "8/8", "total": "8.0", "status": "fail",
+        "summary": "second", "pairwise": "log:better",
+    })
+    rows = Path(path).read_text().strip().split("\n")
+    assert rows[2].rstrip("\r").split("\t")[-1] == "log:better"

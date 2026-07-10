@@ -363,7 +363,7 @@ def append_result(results_tsv: str, row: dict) -> None:
         fieldnames = HEADER_FIELDS
     else:
         with open(path, newline="") as f:
-            first = f.readline().rstrip("\n")
+            first = f.readline().rstrip("\r\n")
         fieldnames = first.split("\t") if first else HEADER_FIELDS
 
     out = dict(row)
