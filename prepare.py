@@ -50,7 +50,10 @@ HAIKU_MODEL = HELPER_MODEL  # alias for backward compat — remove once all refs
 AGENT_MODEL = os.environ.get("EVOLVE_AGENT_MODEL", "gpt-5.4-high")
 
 # Previous Round Evidence cap (chars). 0 disables truncation.
-EVIDENCE_CAP = int(os.environ.get("EVOLVE_EVIDENCE_CAP", "6000"))
+try:
+    EVIDENCE_CAP = int(os.environ.get("EVOLVE_EVIDENCE_CAP", "6000"))
+except ValueError:
+    EVIDENCE_CAP = 6000  # malformed env value must not break the engine
 
 REQUIRED_ADAPTER_FUNCTIONS = ["setup", "run_checks", "teardown"]
 
@@ -929,7 +932,9 @@ def _truncate_evidence(content: str, cap: int) -> str:
     """
     if cap <= 0 or len(content) <= cap:
         return content
-    head, tail = content[:1000], content[-(cap - 1000):]
+    head_len = min(1000, cap // 2)
+    tail_len = cap - head_len
+    head, tail = content[:head_len], content[-tail_len:]
     return (f"{head}\n\n[... truncated {len(content) - cap} chars ...]\n\n"
             f"{tail}")
 

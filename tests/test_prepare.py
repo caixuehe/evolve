@@ -1927,3 +1927,21 @@ def test_prepare_dispatch_truncates_previous_evidence(tmp_path):
     assert "truncated" in content
     assert "B" * 20000 not in content        # middle removed
     assert content.rstrip().endswith("Z" * 5000)  # tail kept (evidence is last)
+
+
+def test_truncate_evidence_small_cap_still_truncates():
+    from prepare import _truncate_evidence
+    content = "X" * 5000
+    out = _truncate_evidence(content, 1000)
+    assert len(out) < len(content)
+    assert "truncated" in out
+    out500 = _truncate_evidence(content, 500)
+    assert len(out500) < 1000 + 100          # ~cap plus marker, never inflated
+
+
+def test_truncate_evidence_default_split_unchanged():
+    from prepare import _truncate_evidence
+    content = "H" * 2000 + "M" * 20000 + "T" * 6000
+    out = _truncate_evidence(content, 6000)
+    assert out.startswith("H" * 1000)         # head still 1000 at default cap
+    assert out.endswith("T" * 5000)           # tail still 5000 at default cap
