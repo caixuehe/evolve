@@ -827,21 +827,41 @@ def test_should_stop_flat_after_pivot():
 # validate_eval_result tests
 # ---------------------------------------------------------------------------
 
-def test_validate_eval_result_missing():
-    """Raises ValueError when independent_evaluator_used is missing."""
-    with pytest.raises(ValueError, match="no independent evaluator"):
-        validate_eval_result({})
+def test_validate_eval_result_ok():
+    validate_eval_result({"independent_evaluator_used": True,
+                          "cascade": "passed"})   # no raise
 
 
-def test_validate_eval_result_false():
-    """Raises ValueError when independent_evaluator_used is False."""
-    with pytest.raises(ValueError, match="no independent evaluator"):
-        validate_eval_result({"independent_evaluator_used": False})
+def test_validate_eval_result_empty_cascade_ok():
+    validate_eval_result({"independent_evaluator_used": True,
+                          "cascade": "empty"})    # no raise
 
 
-def test_validate_eval_result_valid():
-    """No error when independent_evaluator_used is True."""
-    validate_eval_result({"independent_evaluator_used": True})
+def test_validate_eval_result_no_evaluator():
+    with pytest.raises(ValueError, match="independent evaluator"):
+        validate_eval_result({"independent_evaluator_used": False,
+                              "cascade": "passed"})
+
+
+def test_validate_eval_result_missing_cascade():
+    with pytest.raises(ValueError, match="cascade"):
+        validate_eval_result({"independent_evaluator_used": True})
+
+
+def test_validate_eval_result_failed_cascade():
+    with pytest.raises(ValueError, match="cascade"):
+        validate_eval_result({"independent_evaluator_used": True,
+                              "cascade": "cascade_fail"})
+
+
+def test_new_statuses_registered():
+    from prepare import VALID_STATUSES
+    assert "cascade_fail" in VALID_STATUSES
+    assert "forced" in VALID_STATUSES
+
+
+def test_prepare_reexports_cascade():
+    from prepare import load_cascade_config, run_cascade  # noqa: F401
 
 
 # ---------------------------------------------------------------------------

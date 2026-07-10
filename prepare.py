@@ -22,7 +22,8 @@ from pathlib import Path
 
 HEADER_FIELDS = ["commit", "phase", "feature", "scores", "total", "status", "summary"]
 VALID_PHASES = {"plan", "build", "eval"}
-VALID_STATUSES = {"keep", "pass", "fail", "crash", "reset"}
+VALID_STATUSES = {"keep", "pass", "fail", "crash", "reset",
+                  "cascade_fail", "forced"}
 
 HARD_LIMITS = {
     "max_rounds_total": 100,
@@ -326,9 +327,21 @@ def get_evaluator() -> str | None:
 
 
 def validate_eval_result(result: dict) -> None:
-    """Validate that an independent evaluator was used. Raises ValueError if not."""
+    """Validate an eval round result. Raises ValueError if invalid.
+
+    Enforced invariants (AI cannot skip these):
+    1. An independent evaluator was called.
+    2. The deterministic cascade ran and passed ("passed"), or the project
+       declares no cascade in eval.yml ("empty"). A cascade_fail round must
+       be recorded with status=cascade_fail and never reaches the judge.
+    """
     if not result.get("independent_evaluator_used"):
         raise ValueError("Eval invalid: no independent evaluator was called")
+    if result.get("cascade") not in ("passed", "empty"):
+        raise ValueError(
+            "Eval invalid: deterministic cascade did not pass "
+            "(expected result['cascade'] in {'passed', 'empty'})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1338,3 +1351,10 @@ def release_lock(evolve_dir: str) -> None:
         lock_path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Re-exports (new modules; imported at end of file to avoid circular imports)
+# ---------------------------------------------------------------------------
+
+from cascade import load_cascade_config, run_cascade, DEFAULT_STAGE_TIMEOUT  # noqa: E402,F401
