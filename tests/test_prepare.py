@@ -2025,3 +2025,33 @@ def test_truncate_evidence_default_split_unchanged():
     out = _truncate_evidence(content, 6000)
     assert out.startswith("H" * 1000)         # head still 1000 at default cap
     assert out.endswith("T" * 5000)           # tail still 5000 at default cap
+
+
+# ---------------------------------------------------------------------------
+# MANIFEST_MODEL tests
+# ---------------------------------------------------------------------------
+
+def test_manifest_model_default():
+    from prepare import MANIFEST_MODEL
+    assert MANIFEST_MODEL == "claude-haiku-4-5-20251001"
+
+
+def test_haiku_summarize_uses_manifest_model(monkeypatch):
+    import sys, types
+    import prepare as prepare_mod
+    captured = {}
+
+    class _FakeMsg:
+        content = [types.SimpleNamespace(text="fake summary")]
+
+    class _FakeClient:
+        def __init__(self, timeout=None):
+            self.messages = types.SimpleNamespace(
+                create=lambda **kw: captured.update(kw) or _FakeMsg())
+
+    fake_anthropic = types.SimpleNamespace(Anthropic=_FakeClient)
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+
+    out = prepare_mod._haiku_summarize("status", {"f": "content"})
+    assert out == "fake summary"
+    assert captured["model"] == prepare_mod.MANIFEST_MODEL

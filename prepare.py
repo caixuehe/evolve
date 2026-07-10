@@ -48,6 +48,10 @@ HELPER_MODEL = os.environ.get(
     os.environ.get("EVOLVE_HAIKU_MODEL", "claude-sonnet-4-6"),
 )
 HAIKU_MODEL = HELPER_MODEL  # alias for backward compat — remove once all refs migrated
+# Manifest summary is a <=300-token compression job — small-model work.
+# H's own agent stays on HELPER_MODEL; only this one call routes down.
+MANIFEST_MODEL = os.environ.get(
+    "EVOLVE_MANIFEST_MODEL", "claude-haiku-4-5-20251001")
 AGENT_MODEL = os.environ.get("EVOLVE_AGENT_MODEL", "gpt-5.4-high")
 
 # Previous Round Evidence cap (chars). 0 disables truncation.
@@ -733,7 +737,7 @@ def _haiku_summarize(status_text: str, raw_files: dict) -> str:
             files_text += f"\n--- {name} ---\n{content}\n"
 
         response = client.messages.create(
-            model=HAIKU_MODEL,
+            model=MANIFEST_MODEL,
             max_tokens=300,
             messages=[{"role": "user", "content": (
                 "Summarize this evolve run state for the orchestrator to decide next dispatch.\n\n"
