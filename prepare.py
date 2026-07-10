@@ -20,7 +20,8 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-HEADER_FIELDS = ["commit", "phase", "feature", "scores", "total", "status", "summary"]
+HEADER_FIELDS = ["commit", "phase", "feature", "scores", "total",
+                 "status", "summary", "pairwise"]
 VALID_PHASES = {"plan", "build", "eval"}
 VALID_STATUSES = {"keep", "pass", "fail", "crash", "reset",
                   "cascade_fail", "forced"}
@@ -349,16 +350,32 @@ def validate_eval_result(result: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def append_result(results_tsv: str, row: dict) -> None:
-    """Append one row to results.tsv. Creates file with header if it doesn't exist."""
+    """Append one row to results.tsv. Creates file with header if needed.
+
+    Header-adaptive for backward compatibility: appending to an existing
+    file uses THAT file's header (old 7-column files keep their shape);
+    new files get the full HEADER_FIELDS including 'pairwise'.
+    """
     path = Path(results_tsv)
     write_header = not path.exists() or path.stat().st_size == 0
 
+    if write_header:
+        fieldnames = HEADER_FIELDS
+    else:
+        with open(path, newline="") as f:
+            first = f.readline().rstrip("\n")
+        fieldnames = first.split("\t") if first else HEADER_FIELDS
+
+    out = dict(row)
+    if "pairwise" in fieldnames:
+        out.setdefault("pairwise", "-")
+
     with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=HEADER_FIELDS, delimiter="\t",
+        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t",
                                 extrasaction="ignore")
         if write_header:
             writer.writeheader()
-        writer.writerow(row)
+        writer.writerow(out)
 
 
 def read_progress(results_tsv: str) -> dict:

@@ -62,6 +62,49 @@ def test_append_crash_row():
         os.unlink(path)
 
 
+def test_append_result_writes_pairwise_column(tmp_path):
+    path = str(tmp_path / "results.tsv")
+    append_result(path, {
+        "commit": "abc", "phase": "eval", "feature": "F01",
+        "scores": "7/8", "total": "7.5", "status": "fail",
+        "summary": "below threshold", "pairwise": "log:better/ui:same",
+    })
+    lines = Path(path).read_text().strip().split("\n")
+    assert lines[0].split("\t") == HEADER_FIELDS
+    assert lines[0].split("\t")[-1] == "pairwise"
+    assert lines[1].split("\t")[-1] == "log:better/ui:same"
+
+
+def test_append_result_pairwise_defaults_to_dash(tmp_path):
+    path = str(tmp_path / "results.tsv")
+    append_result(path, {
+        "commit": "abc", "phase": "build", "feature": "F01",
+        "scores": "-", "total": "-", "status": "keep", "summary": "built",
+    })
+    lines = Path(path).read_text().strip().split("\n")
+    assert lines[1].split("\t")[-1] == "-"
+
+
+def test_append_result_respects_old_7col_header(tmp_path):
+    # Old results.tsv (7 columns) keeps its shape — no pairwise appended
+    old_header = ["commit", "phase", "feature", "scores", "total",
+                  "status", "summary"]
+    path = tmp_path / "results.tsv"
+    path.write_text("\t".join(old_header) + "\n"
+                    "abc\teval\tF01\t7/8\t7.5\tfail\told row\n")
+    append_result(str(path), {
+        "commit": "def", "phase": "eval", "feature": "F01",
+        "scores": "8/8", "total": "8.0", "status": "pass",
+        "summary": "ok", "pairwise": "log:better",
+    })
+    lines = path.read_text().strip().split("\n")
+    assert len(lines[0].split("\t")) == 7
+    assert len(lines[2].split("\t")) == 7          # pairwise dropped
+    # and old files still parse
+    progress = read_progress(str(path))
+    assert "F01" in progress["completed_features"]
+
+
 def _make_tsv(rows):
     """Helper: create a temp TSV with header + rows."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False) as f:
