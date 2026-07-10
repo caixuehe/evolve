@@ -12,7 +12,8 @@ from prepare import (append_result, read_progress, HEADER_FIELDS,
                      _parse_uncompleted_features,
                      _parse_file_spec, _extract_section,
                      scan_all_features, acquire_build_lock, release_build_lock,
-                     acquire_feature_lock, release_feature_lock)
+                     acquire_feature_lock, release_feature_lock,
+                     BUILD_LOCK_STALE_SECONDS)
 
 def test_append_result_creates_header():
     with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False) as f:
@@ -1526,12 +1527,28 @@ def test_acquire_build_lock_blocked(tmp_path):
 
 
 def test_acquire_build_lock_stale(tmp_path):
+    # build_lock uses BUILD_LOCK_STALE_SECONDS (30 min), not the 120s
+    # LOCK_STALE_SECONDS -- the merge cascade it guards can run for
+    # minutes, so only a heartbeat older than 30 min counts as stale.
     (tmp_path / "build_lock").write_text(json.dumps({
         "pid": 12345, "feature": "F01", "token": "old",
-        "heartbeat": time.time() - 300
+        "heartbeat": time.time() - (BUILD_LOCK_STALE_SECONDS + 60)
     }))
     result = acquire_build_lock(str(tmp_path))
     assert result["acquired"] is True
+
+
+def test_build_lock_not_stolen_during_long_merge(tmp_path):
+    import json, time
+    bl = acquire_build_lock(str(tmp_path))
+    # simulate a merge running for > LOCK_STALE_SECONDS but < BUILD_LOCK_STALE_SECONDS
+    lock_path = tmp_path / "build_lock"
+    data = json.loads(lock_path.read_text())
+    data["heartbeat"] = time.time() - 300   # 5 min old
+    lock_path.write_text(json.dumps(data))
+    second = acquire_build_lock(str(tmp_path))
+    assert second["acquired"] is False       # NOT stolen at 5 min
+    release_build_lock(str(tmp_path), bl["token"])
 
 
 def test_release_build_lock_with_token(tmp_path):

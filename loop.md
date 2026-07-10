@@ -239,7 +239,8 @@ When a feature passes eval, O integrates it:
 ```python
 from prepare import merge_feature, load_cascade_config
 stages = load_cascade_config(".evolve/eval.yml")
-result = merge_feature(".evolve", feat["name"], cascade_stages=stages)
+result = merge_feature(".evolve", feat["name"], cascade_stages=stages,
+                       health_check=getattr(adapter, "health_check", None))
 # "merged"    -> feature completed, worktree cleaned up
 # "gate_fail" -> merge reverted; see .evolve/{feature}/merge_conflict.md;
 #                feature returns to needs_build
@@ -373,7 +374,8 @@ if env["status"] == "crash":
 ```python
 from prepare import load_cascade_config, run_cascade
 stages = load_cascade_config(".evolve/eval.yml")
-gate = run_cascade(".evolve", feature, stages, cwd=worktree_path)
+health = getattr(adapter, "health_check", None)
+gate = run_cascade(".evolve", feature, stages, cwd=worktree_path, health_check=health)
 if gate["status"] == "cascade_fail":
     # Round is VOID — no LLM judge call, no dimension scores.
     append_result(".evolve/results.tsv", {

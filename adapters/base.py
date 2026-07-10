@@ -102,3 +102,14 @@ def allocate_slot(n: int) -> dict:
     adapters that only write to their own worktree).
     """
     return {}
+
+
+def health_check() -> tuple:
+    """
+    OPTIONAL. Return (ok: bool, detail: str).
+
+    When defined, the orchestrator passes it to run_cascade as the
+    implicit stage 0 -- verify the service actually responds (e.g. HTTP
+    200) before any judging.
+    """
+    return True, "ok"

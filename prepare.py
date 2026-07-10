@@ -251,9 +251,18 @@ def analyze_trajectory(results_tsv: str, feature: str, window: int = 3) -> dict:
 
     Logic:
         - Fewer than window eval rows -> "insufficient"
-        - latest - earliest > +0.5 -> "rising"
-        - latest - earliest < -0.5 -> "falling"
-        - Otherwise -> "flat"
+        - cascade_fail rows are skipped entirely (void round: broken
+          build, not a real judgment; excluded from the score series)
+        - When pairwise verdicts (better/same/worse) are present for
+          every row in the window (except the first, which compares
+          against a pre-window round), they take precedence over the
+          raw score delta: net better/worse across the window decides
+          "rising"/"falling"/"flat"
+        - A sign contradiction between the score delta (latest -
+          earliest) and the pairwise net yields "noisy"
+        - Otherwise, falls back to the score delta alone:
+          latest - earliest > +0.5 -> "rising";
+          latest - earliest < -0.5 -> "falling"; else "flat"
     Only reads eval phase rows, ignores build/crash.
     """
     path = Path(results_tsv)
@@ -528,6 +537,8 @@ def read_progress(results_tsv: str) -> dict:
     elif last_phase == "eval" and last_status == "fail":
         result["phase"] = "build"
         result["current_feature"] = last_feature if last_feature != "-" else None
+    elif last_phase == "eval" and last_status == "forced":
+        result["phase"] = "build"
     else:
         result["phase"] = "init"
 
@@ -1167,7 +1178,10 @@ def scan_all_features(evolve_dir: str) -> list[dict]:
                 1 for r in feat_data if r.get("phase") == "eval"
             )
 
-            # Count consecutive fails
+            # Count consecutive fails. Real round cadence is
+            # build/keep -> eval/fail every round, so a build between
+            # fails does not end the fail streak -- only eval/pass or
+            # status=reset do (matches read_progress's counting semantics).
             for r in reversed(feat_data):
                 if r.get("status") == "reset":
                     break
@@ -1176,7 +1190,7 @@ def scan_all_features(evolve_dir: str) -> list[dict]:
                 elif r.get("phase") == "eval" and r.get("status") == "pass":
                     break
                 elif r.get("phase") == "build" and r.get("status") == "keep":
-                    break
+                    continue
 
             # Determine state
             if last_phase == "eval" and last_status in ("pass", "forced"):
@@ -1227,6 +1241,11 @@ def acquire_build_lock(evolve_dir: str) -> dict:
     Acquire the global B-exclusive lock. Only one B agent can run at a time.
     Uses atomic file creation (O_CREAT | O_EXCL) to prevent TOCTOU races.
 
+    Uses BUILD_LOCK_STALE_SECONDS (not LOCK_STALE_SECONDS) because this
+    lock guards merge_feature's integration cascade, which can run for
+    minutes -- a 120s staleness window would let a second acquire steal
+    the lock mid-merge.
+
     Returns {"acquired": True/False, "reason": ..., "feature": ..., "token": ...}.
     """
     lock_path = Path(evolve_dir) / "build_lock"
@@ -1236,7 +1255,7 @@ def acquire_build_lock(evolve_dir: str) -> dict:
         try:
             data = json.loads(lock_path.read_text())
             elapsed = time.time() - data.get("heartbeat", 0)
-            if elapsed < LOCK_STALE_SECONDS:
+            if elapsed < BUILD_LOCK_STALE_SECONDS:
                 return {
                     "acquired": False,
                     "reason": f"B agent active on {data.get('feature', '?')} "
@@ -1382,6 +1401,7 @@ def release_feature_lock(evolve_dir: str, feature: str, token: str = None) -> No
 # ---------------------------------------------------------------------------
 
 LOCK_STALE_SECONDS = 120  # 2 minutes -- if heartbeat older than this, lock is stale
+BUILD_LOCK_STALE_SECONDS = 1800  # merge cascade can run for minutes; steal only after 30 min
 
 
 def acquire_lock(evolve_dir: str) -> dict:

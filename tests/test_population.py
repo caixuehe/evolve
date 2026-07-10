@@ -67,6 +67,18 @@ def test_should_branch_budget_exhausted(tmp_path):
     assert "budget" in reason
 
 
+def test_should_branch_with_realistic_build_interleaved_history(tmp_path):
+    # Real cadence: build/keep then eval/fail every round. The fail streak
+    # must accumulate across builds, or branching can never trigger.
+    rows = []
+    for i in range(BRANCH_AFTER_CONSECUTIVE_FAILS):
+        rows.append([f"b{i}", "build", "F01", "-", "-", "keep", f"build {i}"])
+        rows.append([f"e{i}", "eval", "F01", "6/6", "6.0", "fail", f"round {i}"])
+    evolve = _evolve(tmp_path, rows=rows)
+    branch, reason = should_branch(evolve, "F01")
+    assert branch is True
+
+
 def _run(args, cwd):
     return subprocess.run(args, cwd=cwd, check=True,
                           capture_output=True, text=True)
