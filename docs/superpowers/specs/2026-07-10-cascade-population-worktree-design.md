@@ -2,6 +2,7 @@
 
 Date: 2026-07-10
 Status: approved
+中文版: [2026-07-10-cascade-population-worktree-design.zh.md](./2026-07-10-cascade-population-worktree-design.zh.md)
 
 ## Motivation
 
