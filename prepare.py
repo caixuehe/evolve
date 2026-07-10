@@ -767,9 +767,14 @@ def build_manifest(evolve_dir: str) -> str:
     # Parallel feature scan
     features = scan_all_features(evolve_dir)
 
-    # Build lock status
+    # Build lock status — probe WITHOUT holding: acquiring for the status
+    # line and never releasing poisoned merges for BUILD_LOCK_STALE_SECONDS.
     bl = acquire_build_lock(evolve_dir)
-    build_lock_status = "free" if bl["acquired"] else f"locked ({bl['reason']})"
+    if bl["acquired"]:
+        release_build_lock(evolve_dir, bl["token"])
+        build_lock_status = "free"
+    else:
+        build_lock_status = f"locked ({bl['reason']})"
 
     # Structured status
     status_lines = [

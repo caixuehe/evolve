@@ -1874,3 +1874,20 @@ def test_generate_report_candidate_pass_does_not_complete_parent(tmp_path):
     assert "✓ F01" not in report            # not shown as passed
     assert "Complete" not in report         # run not complete
     assert "candidate passed" in report     # visible in iteration record
+
+
+def test_build_manifest_does_not_leak_build_lock(tmp_path, monkeypatch):
+    import prepare as prepare_mod
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda status, files: "(stub summary)")
+    evolve = tmp_path / ".evolve"
+    evolve.mkdir()
+    (evolve / "spec.md").write_text("- [ ] F01\n")
+    (evolve / "results.tsv").write_text("\t".join(HEADER_FIELDS) + "\n")
+
+    manifest = build_manifest(str(evolve))
+    assert "build_lock: free" in manifest
+    # The probe must not leave the lock held
+    bl = acquire_build_lock(str(evolve))
+    assert bl["acquired"] is True
+    release_build_lock(str(evolve), bl["token"])
