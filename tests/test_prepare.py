@@ -1820,3 +1820,18 @@ def test_generate_report_shows_forced_split(tmp_path):
     report = generate_report(path)
     assert "1 true + 1 forced" in report
     assert "⚑ F02" in report
+
+
+def test_generate_report_candidate_pass_does_not_complete_parent(tmp_path):
+    path = str(tmp_path / "results.tsv")
+    append_result(path, {"commit": "a", "phase": "eval", "feature": "F01",
+                         "scores": "6/6", "total": "6.0", "status": "fail",
+                         "summary": "stuck"})
+    append_result(path, {"commit": "b", "phase": "eval",
+                         "feature": "F01@cand2", "scores": "9/9",
+                         "total": "9.0", "status": "pass",
+                         "summary": "candidate passed"})
+    report = generate_report(path)
+    assert "✓ F01" not in report            # not shown as passed
+    assert "Complete" not in report         # run not complete
+    assert "candidate passed" in report     # visible in iteration record

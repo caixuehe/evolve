@@ -560,20 +560,27 @@ def generate_report(results_tsv: str) -> str:
     # Group by feature
     features = {}  # preserves insertion order (Python 3.7+)
     for row in rows:
-        feat = row.get("feature", "-")
-        if feat == "-":
+        raw_feat = row.get("feature", "-")
+        if raw_feat == "-":
             continue
-        feat = feat.split("@cand")[0]   # fold candidate rows into parent
+        feat = raw_feat.split("@cand")[0]   # fold candidate rows into parent
+        is_candidate = raw_feat != feat
         if feat not in features:
             features[feat] = {"rows": [], "final_status": None,
                               "final_total": None, "pass_round": None}
         features[feat]["rows"].append(row)
+        if is_candidate:
+            # Candidate eval/pass rows only feed the iteration record;
+            # they must never flip the parent's final status before the
+            # winning branch is actually merged.
+            continue
         features[feat]["final_status"] = row.get("status")
         if row.get("total", "-") != "-":
             features[feat]["final_total"] = row.get("total")
         if row.get("phase") == "eval" and row.get("status") == "pass":
             features[feat]["pass_round"] = sum(
-                1 for r in features[feat]["rows"] if r.get("phase") == "eval"
+                1 for r in features[feat]["rows"]
+                if r.get("phase") == "eval" and "@cand" not in r.get("feature", "")
             )
 
     completed = [f for f, i in features.items() if i["final_status"] == "pass"]
