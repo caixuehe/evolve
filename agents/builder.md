@@ -116,3 +116,15 @@ check).  B must not undermine the gate:
 - Write to `.evolve/{feature}/strategy.md`
 - Call independent evaluators
 - Touch `.evolve/adapter.py`, `eval.yml`, `expected_path.md`, or `runs/`
+
+## Worktree Isolation
+
+- Your dispatch names YOUR worktree path (`.evolve/worktrees/{slug}`).
+  ALL code edits happen there — never in the main working tree, never on
+  the evolve/<tag> branch directly.
+- Commit inside the worktree as usual (one commit per run). Integration
+  into evolve/<tag> is O's job via merge_feature() after the feature
+  passes — you never merge.
+- If your feature id contains `@cand` you are one of several parallel
+  candidates: follow the seeded approach in your strategy.md exactly;
+  do not converge on another candidate's approach.
