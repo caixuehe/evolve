@@ -78,3 +78,59 @@ def should_branch(evolve_dir: str, feature: str) -> tuple:
                      f"{BRANCH_AFTER_CONSECUTIVE_FAILS})"
     return False, (f"{fails} consecutive fails (< "
                    f"{BRANCH_AFTER_CONSECUTIVE_FAILS})")
+
+
+def spawn_candidates(evolve_dir: str, feature: str,
+                     approaches: list) -> list:
+    """Fork N candidate worktrees for a stuck feature, each seeded with a
+    distinct approach (O draws approaches from Mentor hypotheses and C's
+    untried Pivot options).
+
+    Returns [{"cand_id", "feature_id", "path", "branch", "approach"}].
+    Raises ValueError if approaches is empty.
+    """
+    from prepare import HARD_LIMITS
+    from worktree import (create_feature_worktree, feature_branch,
+                          feature_slug, base_branch, _repo_root, _git)
+
+    if not approaches:
+        raise ValueError("spawn_candidates requires at least one approach")
+
+    n = min(len(approaches), HARD_LIMITS["candidates_per_branching"])
+    root = _repo_root(evolve_dir)
+
+    # Fork from the feature's own branch if it exists, else the base branch.
+    incumbent = feature_branch(evolve_dir, feature)
+    if _git(["rev-parse", "--verify", "refs/heads/" + incumbent],
+            root).returncode != 0:
+        incumbent = base_branch(evolve_dir)
+
+    state = _branching_state(evolve_dir, feature) or {"round": 0}
+    candidates = []
+    for i in range(1, n + 1):
+        cand_name = f"{feature_slug(feature)}-cand{i}"
+        wt = create_feature_worktree(evolve_dir, cand_name,
+                                     from_branch=incumbent)
+        feature_id = candidate_feature_id(feature, i)
+        cand_dir = Path(evolve_dir) / feature_id
+        cand_dir.mkdir(parents=True, exist_ok=True)
+        (cand_dir / "strategy.md").write_text(
+            f"# Candidate {i} strategy (seeded)\n\n"
+            f"## Approach\n\n{approaches[i - 1]}\n\n"
+            f"## Rules\n\n- Work ONLY in worktree {wt['path']}\n"
+            f"- Record results.tsv rows with feature id {feature_id}\n"
+        )
+        candidates.append({"cand_id": i, "feature_id": feature_id,
+                           "path": wt["path"], "branch": wt["branch"],
+                           "approach": approaches[i - 1]})
+
+    _write_branching_state(evolve_dir, feature, {
+        "round": state.get("round", 0) + 1,
+        "completed": False,
+        "winner_outcome": None,
+        "candidates": [{"cand_id": c["cand_id"],
+                        "feature_id": c["feature_id"],
+                        "branch": c["branch"],
+                        "approach": c["approach"]} for c in candidates],
+    })
+    return candidates
