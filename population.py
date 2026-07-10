@@ -134,3 +134,125 @@ def spawn_candidates(evolve_dir: str, feature: str,
                         "approach": c["approach"]} for c in candidates],
     })
     return candidates
+
+
+def _min_dim(scores_str: str):
+    """'7/8/9' -> 7.0. Returns None if unparseable."""
+    try:
+        vals = [float(s) for s in scores_str.split("/")]
+        return min(vals) if vals else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def _last_eval_row(rows: list, feature_id: str):
+    for r in reversed(rows):
+        if r.get("feature") == feature_id and r.get("phase") == "eval":
+            return r
+    return None
+
+
+def select_candidate(evolve_dir: str, feature: str) -> dict:
+    """Pick the branching round's winner from results.tsv candidate rows.
+
+    Rules (spec §3):
+      1. cascade_fail rows disqualify that candidate;
+      2. a candidate whose last eval status == "pass" wins outright;
+      3. otherwise the candidate with the highest MINIMUM dimension score
+         (tie-break: highest total) is ADOPTED as the new lineage — but
+         only if it beats the incumbent's last min-dim;
+      4. else outcome "none" (forced_pass gate opens; see can_force_pass).
+
+    Marks branching.json completed and records winner_outcome.
+    On "pass" AND "adopt": resets the incumbent feature branch to the
+    winner's branch — so the standard merge_feature(feature) path works
+    afterwards and EVERY candidate branch can be safely cleaned up here
+    (otherwise a pass-winner's branch would be deleted before O merges it).
+    On "adopt" additionally appends a status=reset row so fail counting
+    restarts.
+    """
+    import csv as _csv
+    from prepare import append_result
+    from worktree import (feature_branch, feature_slug, _repo_root, _git,
+                          remove_feature_worktree)
+
+    state = _branching_state(evolve_dir, feature)
+    if not state or not state.get("candidates"):
+        return {"outcome": "none", "cand_id": None, "feature_id": None,
+                "detail": "no branching round in progress"}
+
+    tsv = Path(evolve_dir) / "results.tsv"
+    rows = []
+    if tsv.exists():
+        with open(tsv, newline="") as f:
+            rows = list(_csv.DictReader(f, delimiter="\t"))
+
+    incumbent_row = _last_eval_row(
+        rows, feature) if rows else None
+    incumbent_min = _min_dim(incumbent_row["scores"]) if incumbent_row \
+        else None
+
+    best = None   # (min_dim, total, cand)
+    winner = None
+    for cand in state["candidates"]:
+        last = _last_eval_row(rows, cand["feature_id"])
+        if last is None or last.get("status") == "cascade_fail":
+            continue
+        if last.get("status") == "pass":
+            winner = ("pass", cand)
+            break
+        min_dim = _min_dim(last.get("scores", ""))
+        if min_dim is None:
+            continue
+        try:
+            total = float(last.get("total", "0"))
+        except ValueError:
+            total = 0.0
+        if best is None or (min_dim, total) > (best[0], best[1]):
+            best = (min_dim, total, cand)
+
+    if winner is None and best is not None and \
+            (incumbent_min is None or best[0] > incumbent_min):
+        winner = ("adopt", best[2])
+
+    outcome = winner[0] if winner else "none"
+    cand = winner[1] if winner else None
+
+    state["completed"] = True
+    state["winner_outcome"] = outcome
+    state["winner"] = cand["feature_id"] if cand else None
+    _write_branching_state(evolve_dir, feature, state)
+
+    if outcome in ("pass", "adopt"):
+        # Point the incumbent feature branch at the winner. After this,
+        # the winner's commits live on the feature branch, so all
+        # candidate branches (including the winner's) are safe to delete
+        # below, and O merges via the standard merge_feature(feature).
+        root = _repo_root(evolve_dir)
+        incumbent_branch = feature_branch(evolve_dir, feature)
+        if _git(["rev-parse", "--verify", "refs/heads/" + incumbent_branch],
+                root).returncode == 0:
+            # Feature worktree must not hold the branch while we move it.
+            remove_feature_worktree(evolve_dir, feature,
+                                    delete_branch=False)
+            _git(["branch", "-f", incumbent_branch, cand["branch"]], root)
+        else:
+            _git(["branch", incumbent_branch, cand["branch"]], root)
+        if outcome == "adopt":
+            append_result(str(tsv), {
+                "commit": "-", "phase": "build", "feature": feature,
+                "scores": "-", "total": "-", "status": "reset",
+                "summary": f"adopted candidate {cand['cand_id']} lineage "
+                           f"({cand['branch']})",
+            })
+
+    # Candidate cleanup: every candidate worktree+branch goes. Safe even
+    # for the winner — its commits now live on the incumbent branch.
+    for c in state["candidates"]:
+        cand_name = f"{feature_slug(feature)}-cand{c['cand_id']}"
+        remove_feature_worktree(evolve_dir, cand_name)
+
+    return {"outcome": outcome,
+            "cand_id": cand["cand_id"] if cand else None,
+            "feature_id": cand["feature_id"] if cand else None,
+            "detail": f"winner_outcome={outcome}"}

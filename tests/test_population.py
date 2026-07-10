@@ -7,7 +7,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from population import (parent_feature, candidate_feature_id,
                         should_branch, BRANCH_AFTER_CONSECUTIVE_FAILS,
-                        spawn_candidates)
+                        spawn_candidates, select_candidate)
 from prepare import HARD_LIMITS
 
 HEADER = "commit\tphase\tfeature\tscores\ttotal\tstatus\tsummary"
@@ -112,3 +112,65 @@ def test_spawn_candidates_requires_approaches(tmp_path):
     evolve = _git_evolve(tmp_path)
     with pytest.raises(ValueError):
         spawn_candidates(evolve, "F01", [])
+
+
+def _min_dim_rows():
+    """3 candidates: cand1 cascade_fail, cand2 min-dim 6, cand3 min-dim 7."""
+    return [
+        ["a", "eval", "F01", "6/6", "6.0", "fail", "incumbent"],
+        ["b", "eval", "F01@cand1", "-", "0", "cascade_fail", "broken"],
+        ["c", "eval", "F01@cand2", "6/9", "7.5", "fail", "half"],
+        ["d", "eval", "F01@cand3", "7/8", "7.5", "fail", "solid"],
+    ]
+
+
+def _spawn_three(evolve):
+    return spawn_candidates(evolve, "F01", ["a1", "a2", "a3"])
+
+
+def test_select_candidate_pass_wins_outright(tmp_path):
+    evolve = _git_evolve(tmp_path, rows=_min_dim_rows() + [
+        ["e", "eval", "F01@cand2", "9/9", "9.0", "pass", "threshold met"],
+    ])
+    _spawn_three(evolve)
+    result = select_candidate(evolve, "F01")
+    assert result["outcome"] == "pass"
+    assert result["feature_id"] == "F01@cand2"
+    state = json.loads((Path(evolve) / "F01" / "branching.json").read_text())
+    assert state["completed"] is True
+    assert state["winner_outcome"] == "pass"
+
+
+def test_select_candidate_adopts_best_min_dim(tmp_path):
+    evolve = _git_evolve(tmp_path, rows=_min_dim_rows())
+    _spawn_three(evolve)
+    result = select_candidate(evolve, "F01")
+    assert result["outcome"] == "adopt"           # cand3: min-dim 7 > 6
+    assert result["feature_id"] == "F01@cand3"
+    # adopt appends a reset row for the parent feature
+    tsv = (Path(evolve) / "results.tsv").read_text()
+    assert "reset" in tsv and "adopted candidate 3" in tsv
+
+
+def test_select_candidate_none_when_no_improvement(tmp_path):
+    rows = [
+        ["a", "eval", "F01", "7/7", "7.0", "fail", "incumbent"],
+        ["b", "eval", "F01@cand1", "5/6", "5.5", "fail", "worse"],
+        ["c", "eval", "F01@cand2", "6/6", "6.0", "fail", "worse"],
+        ["d", "eval", "F01@cand3", "-", "0", "cascade_fail", "broken"],
+    ]
+    evolve = _git_evolve(tmp_path, rows=rows)
+    _spawn_three(evolve)
+    result = select_candidate(evolve, "F01")
+    assert result["outcome"] == "none"
+    state = json.loads((Path(evolve) / "F01" / "branching.json").read_text())
+    assert state["winner_outcome"] == "none"
+
+
+def test_scan_resets_fail_count_on_reset_row(tmp_path):
+    from prepare import scan_all_features
+    rows = (_fail_rows("F01", 4) +
+            [["r", "build", "F01", "-", "-", "reset", "adopted candidate 2"]])
+    evolve = _evolve(tmp_path, rows=rows)
+    info = next(f for f in scan_all_features(evolve) if f["name"] == "F01")
+    assert info["consecutive_fails"] == 0

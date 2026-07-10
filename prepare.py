@@ -1144,6 +1144,8 @@ def scan_all_features(evolve_dir: str) -> list[dict]:
 
             # Count consecutive fails
             for r in reversed(feat_data):
+                if r.get("status") == "reset":
+                    break
                 if r.get("phase") == "eval" and r.get("status") == "fail":
                     info["consecutive_fails"] += 1
                 elif r.get("phase") == "eval" and r.get("status") == "pass":
