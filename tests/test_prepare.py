@@ -1773,3 +1773,50 @@ def test_prepare_dispatch_b_never_gets_evidence(tmp_path):
 
     path = prepare_dispatch(str(evolve), "B", ["program.md"], feature="F01")
     assert "## Previous Round Evidence" not in Path(path).read_text()
+
+
+def test_read_progress_forced_features(tmp_path):
+    path = str(tmp_path / "results.tsv")
+    append_result(path, {"commit": "a", "phase": "eval", "feature": "F01",
+                         "scores": "9/9", "total": "9.0", "status": "pass",
+                         "summary": "real pass"})
+    append_result(path, {"commit": "-", "phase": "eval", "feature": "F02",
+                         "scores": "-", "total": "-", "status": "forced",
+                         "summary": "forced_pass approved"})
+    append_result(path, {"commit": "b", "phase": "eval",
+                         "feature": "F03@cand1", "scores": "9/9",
+                         "total": "9.0", "status": "pass",
+                         "summary": "candidate pass"})
+    p = read_progress(path)
+    assert p["completed_features"] == ["F01"]      # no forced, no @cand
+    assert p["forced_features"] == ["F02"]
+
+
+def test_scan_all_features_forced_and_branching(tmp_path):
+    evolve = tmp_path / ".evolve"
+    evolve.mkdir()
+    (evolve / "spec.md").write_text("- [ ] F01\n- [ ] F02\n")
+    (evolve / "results.tsv").write_text(
+        "\t".join(HEADER_FIELDS) + "\n"
+        "-\teval\tF01\t-\t-\tforced\twaived\t-\n"
+    )
+    f02 = evolve / "F02"
+    f02.mkdir()
+    (f02 / "branching.json").write_text(
+        '{"round": 1, "completed": false}')
+    feats = {f["name"]: f for f in scan_all_features(str(evolve))}
+    assert feats["F01"]["state"] == "completed"
+    assert feats["F02"]["state"] == "branching"
+
+
+def test_generate_report_shows_forced_split(tmp_path):
+    path = str(tmp_path / "results.tsv")
+    append_result(path, {"commit": "a", "phase": "eval", "feature": "F01",
+                         "scores": "9/9", "total": "9.0", "status": "pass",
+                         "summary": "real"})
+    append_result(path, {"commit": "-", "phase": "eval", "feature": "F02",
+                         "scores": "-", "total": "-", "status": "forced",
+                         "summary": "waived"})
+    report = generate_report(path)
+    assert "1 true + 1 forced" in report
+    assert "⚑ F02" in report

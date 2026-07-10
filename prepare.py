@@ -449,6 +449,7 @@ def read_progress(results_tsv: str) -> dict:
         "base_commit": None,
         "total_iterations": len(rows),
         "completed_features": [],
+        "forced_features": [],
         "skipped_features": [],
         "last_pass_commit": None,
         "feature_iterations": 0,
@@ -465,10 +466,16 @@ def read_progress(results_tsv: str) -> dict:
         feature = row.get("feature", "-")
         commit = row.get("commit", "")
 
+        if feature != "-" and "@cand" in feature:
+            continue   # candidate rows never complete a spec feature
+
         if phase == "eval" and status == "pass":
             if feature not in result["completed_features"] and feature != "-":
                 result["completed_features"].append(feature)
             result["last_pass_commit"] = commit
+        elif phase == "eval" and status == "forced":
+            if feature not in result["forced_features"] and feature != "-":
+                result["forced_features"].append(feature)
 
     last = rows[-1]
     last_phase = last.get("phase", "")
@@ -556,6 +563,7 @@ def generate_report(results_tsv: str) -> str:
         feat = row.get("feature", "-")
         if feat == "-":
             continue
+        feat = feat.split("@cand")[0]   # fold candidate rows into parent
         if feat not in features:
             features[feat] = {"rows": [], "final_status": None,
                               "final_total": None, "pass_round": None}
@@ -569,13 +577,14 @@ def generate_report(results_tsv: str) -> str:
             )
 
     completed = [f for f, i in features.items() if i["final_status"] == "pass"]
+    forced = [f for f, i in features.items() if i["final_status"] == "forced"]
     skipped = [f for f, i in features.items() if i["final_status"] == "skip"]
     total_features = len(features)
 
     # Find current feature (last non-completed, non-skipped)
     current_feat = None
     for feat, info in features.items():
-        if info["final_status"] not in ("pass", "skip"):
+        if info["final_status"] not in ("pass", "forced", "skip"):
             current_feat = feat
 
     # Build report
@@ -584,7 +593,8 @@ def generate_report(results_tsv: str) -> str:
     # Status line
     if not features:
         lines.append("## Status: Waiting to start")
-    elif len(completed) + len(skipped) == total_features and total_features > 0:
+    elif len(completed) + len(forced) + len(skipped) == total_features \
+            and total_features > 0:
         lines.append(f"## Status: Complete -- Round {total_rounds} | All passed")
     else:
         lines.append(f"## Status: In Progress -- Round {total_rounds}")
@@ -593,7 +603,13 @@ def generate_report(results_tsv: str) -> str:
 
     # Overview
     lines.append("## Overview")
-    if current_feat:
+    if forced:
+        lines.append(f"  Passed: {len(completed)} true + {len(forced)} "
+                     f"forced / {total_features} features"
+                     + (f" | Current: {current_feat} (best "
+                        f"{features[current_feat]['final_total'] or '-'})"
+                        if current_feat else ""))
+    elif current_feat:
         best = features[current_feat]["final_total"] or "-"
         lines.append(f"  Passed: {len(completed)}/{total_features} features | "
                      f"Current: {current_feat} (best {best})")
@@ -611,6 +627,8 @@ def generate_report(results_tsv: str) -> str:
                 rnd = info["pass_round"] or "?"
                 score = info["final_total"] or "-"
                 lines.append(f"  \u2713 {feat}    -- passed round {rnd} ({score})")
+            elif info["final_status"] == "forced":
+                lines.append(f"  \u2691 {feat}    -- forced (waived, not a true pass)")
             elif info["final_status"] == "skip":
                 lines.append(f"  \u2717 {feat}    -- skipped")
             elif feat == current_feat:
@@ -1154,7 +1172,7 @@ def scan_all_features(evolve_dir: str) -> list[dict]:
                     break
 
             # Determine state
-            if last_phase == "eval" and last_status == "pass":
+            if last_phase == "eval" and last_status in ("pass", "forced"):
                 info["state"] = "completed"
             elif last_phase == "build" and last_status == "keep":
                 info["state"] = "needs_eval"
@@ -1164,6 +1182,16 @@ def scan_all_features(evolve_dir: str) -> list[dict]:
                 info["state"] = "needs_build"
             else:
                 info["state"] = "needs_build"
+
+        # Branching round in flight overrides build/eval states
+        branching_json = evolve_path / feat_name / "branching.json"
+        if info["state"] != "completed" and branching_json.exists():
+            try:
+                bstate = json.loads(branching_json.read_text())
+                if not bstate.get("completed"):
+                    info["state"] = "branching"
+            except (json.JSONDecodeError, OSError):
+                pass
 
         # Check per-feature lock
         feat_lock = evolve_path / feat_name / "lock"
@@ -1446,3 +1474,7 @@ from cascade import load_cascade_config, run_cascade, DEFAULT_STAGE_TIMEOUT  # n
 from worktree import (create_feature_worktree, remove_feature_worktree,  # noqa: E402,F401
                       merge_feature, prune_stale_worktrees, feature_slug,
                       feature_branch, worktree_path, base_branch)
+from population import (should_branch, spawn_candidates, select_candidate,  # noqa: E402,F401
+                        can_force_pass, mark_forced_pass, parent_feature,
+                        candidate_feature_id,
+                        BRANCH_AFTER_CONSECUTIVE_FAILS)

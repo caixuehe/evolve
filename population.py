@@ -272,3 +272,37 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
             "cand_id": cand["cand_id"] if cand else None,
             "feature_id": cand["feature_id"] if cand else None,
             "detail": f"winner_outcome={outcome}"}
+
+
+def can_force_pass(evolve_dir: str, feature: str) -> tuple:
+    """forced_pass gate: open ONLY after a completed branching round
+    produced no passing winner. Returns (ok: bool, reason: str)."""
+    state = _branching_state(evolve_dir, feature)
+    if state is None:
+        return False, "gate closed: no branching round attempted yet"
+    if not state.get("completed"):
+        return False, "gate closed: branching round still in flight"
+    if state.get("winner_outcome") == "pass":
+        return False, "gate closed: branching produced a passing winner"
+    return True, ("branching round completed with no passing candidate "
+                  f"(winner_outcome={state.get('winner_outcome')})")
+
+
+def mark_forced_pass(evolve_dir: str, feature: str,
+                     user_approved: bool) -> None:
+    """The ONLY sanctioned path to a status=forced row.
+
+    Raises ValueError if the gate is closed or approval is missing.
+    """
+    ok, reason = can_force_pass(evolve_dir, feature)
+    if not ok:
+        raise ValueError(f"forced_pass gate: {reason}")
+    if user_approved is not True:
+        raise ValueError("forced_pass requires explicit user approval")
+
+    from prepare import append_result
+    append_result(str(Path(evolve_dir) / "results.tsv"), {
+        "commit": "-", "phase": "eval", "feature": feature,
+        "scores": "-", "total": "-", "status": "forced",
+        "summary": f"forced_pass approved by user ({reason})",
+    })

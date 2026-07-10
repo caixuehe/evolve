@@ -7,7 +7,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from population import (parent_feature, candidate_feature_id,
                         should_branch, BRANCH_AFTER_CONSECUTIVE_FAILS,
-                        spawn_candidates, select_candidate)
+                        spawn_candidates, select_candidate,
+                        can_force_pass, mark_forced_pass)
 from prepare import HARD_LIMITS
 
 HEADER = "commit\tphase\tfeature\tscores\ttotal\tstatus\tsummary"
@@ -203,3 +204,53 @@ def test_scan_resets_fail_count_on_reset_row(tmp_path):
     evolve = _evolve(tmp_path, rows=rows)
     info = next(f for f in scan_all_features(evolve) if f["name"] == "F01")
     assert info["consecutive_fails"] == 0
+
+
+def _completed_branching(evolve, feature, outcome):
+    d = Path(evolve) / feature
+    d.mkdir(exist_ok=True)
+    (d / "branching.json").write_text(json.dumps(
+        {"round": 1, "completed": True, "winner_outcome": outcome,
+         "candidates": [{"cand_id": 1, "feature_id": f"{feature}@cand1",
+                         "branch": "x", "approach": "a"}]}))
+
+
+def test_can_force_pass_requires_branching(tmp_path):
+    evolve = _evolve(tmp_path, rows=_fail_rows("F01", 8))
+    ok, reason = can_force_pass(evolve, "F01")
+    assert ok is False
+    assert "branching" in reason
+
+
+def test_can_force_pass_closed_while_in_flight(tmp_path):
+    evolve = _evolve(tmp_path, rows=_fail_rows("F01", 8))
+    d = Path(evolve) / "F01"
+    d.mkdir(exist_ok=True)
+    (d / "branching.json").write_text(json.dumps(
+        {"round": 1, "completed": False}))
+    assert can_force_pass(evolve, "F01")[0] is False
+
+
+def test_can_force_pass_closed_after_passing_winner(tmp_path):
+    evolve = _evolve(tmp_path, rows=_fail_rows("F01", 8))
+    _completed_branching(evolve, "F01", "pass")
+    assert can_force_pass(evolve, "F01")[0] is False
+
+
+def test_can_force_pass_open_after_no_winner(tmp_path):
+    evolve = _evolve(tmp_path, rows=_fail_rows("F01", 8))
+    _completed_branching(evolve, "F01", "none")
+    ok, reason = can_force_pass(evolve, "F01")
+    assert ok is True
+
+
+def test_mark_forced_pass_gate_and_approval(tmp_path):
+    evolve = _evolve(tmp_path, rows=_fail_rows("F01", 8))
+    with pytest.raises(ValueError, match="gate"):
+        mark_forced_pass(evolve, "F01", user_approved=True)
+    _completed_branching(evolve, "F01", "none")
+    with pytest.raises(ValueError, match="approval"):
+        mark_forced_pass(evolve, "F01", user_approved=False)
+    mark_forced_pass(evolve, "F01", user_approved=True)
+    tsv = (Path(evolve) / "results.tsv").read_text()
+    assert "forced" in tsv
