@@ -43,7 +43,22 @@ entirely.
 pass gate), and `analyze_trajectory`'s contradiction→`noisy` rule is the
 backstop if a truncated rationale ever skews a verdict.
 
-## Item 2 — Manifest caching (eliminate repeat computation)
+## Item 0 — Prerequisite bugfix: build_manifest leaks build_lock
+
+**Where:** `prepare.py`, `build_manifest()` (~line 771).
+
+**Current:** the "build lock status" line is produced by CALLING
+`acquire_build_lock()` — which actually acquires the lock — and never
+releasing it. Pre-existing leak that self-healed within the old 120s
+staleness; with `BUILD_LOCK_STALE_SECONDS = 1800` (this branch's I3 fix)
+every manifest build now poisons merges for up to 30 minutes.
+
+**Change:** probe without holding — if `acquire_build_lock` succeeds,
+immediately `release_build_lock(evolve_dir, token)` and report "free";
+if it fails, report the locked reason. Regression test: after
+`build_manifest()`, a fresh `acquire_build_lock()` must succeed.
+
+## Item 2 — Manifest summary caching (eliminate repeat computation)
 
 **Where:** `prepare.py`, `build_manifest()`.
 
@@ -51,17 +66,25 @@ backstop if a truncated rationale ever skews a verdict.
 even when nothing changed since the previous round. At 1-minute cadence
 with a 20-minute build in flight, that is ~19 wasted calls.
 
-**Change:** fingerprint the manifest's input sources —
-`sha256(results.tsv bytes + spec.md bytes + each {feature}/strategy.md
-bytes)` (files read in sorted path order; missing files contribute a
-placeholder) — stored in `.evolve/manifest.hash`. If the fingerprint
-matches AND `.evolve/manifest.md` exists, return the existing manifest
-without any LLM call. On regeneration, write the new hash after writing
-the manifest.
+**Change — cache the SUMMARY, never the manifest.** The manifest's
+`Status` / `Feature States` sections include volatile state (lock
+holders, `in_progress` flags, time-based should_stop) that changes
+without any file changing — caching the whole manifest would serve stale
+state and violate the zero-functional-change constraint. So the manifest
+is always assembled fresh (cheap, deterministic), and only the expensive
+summary call is cached:
 
-**Why safe:** the fingerprint covers every input the manifest summarizes;
-any state change forces regeneration. Worst failure mode is a stale hash
-file → one redundant regeneration, never a stale manifest.
+- fingerprint = `sha256(json of {round, phase, feature, raw_files})`
+  where `raw_files` is exactly the dict passed to `_haiku_summarize`
+- cache file `.evolve/manifest_summary.json`:
+  `{"fingerprint": ..., "summary": ...}`
+- fingerprint match → reuse cached summary, zero LLM calls; miss →
+  summarize and rewrite the cache
+
+**Why safe:** the fingerprint covers every content input the summary
+narrates; volatile lock/timing state never enters the summary's inputs
+and is always recomputed in the structured sections. Worst failure mode
+is a corrupt cache file → one redundant summarize call.
 
 ## Item 3 — Manifest summary on a small model (routing)
 
@@ -155,9 +178,13 @@ Unit tests (tmp-dir pattern, no network — the summarizer is monkeypatched):
 
 - Item 1: over-cap file truncated with marker and correct head/tail sizes;
   under-cap file untouched; cap=0 disables.
+- Item 0: after `build_manifest()`, a fresh `acquire_build_lock()`
+  succeeds (no leaked lock).
 - Item 2: second `build_manifest` call with unchanged inputs does NOT
   invoke the summarizer (monkeypatched sentinel raises if called) and
-  returns the cached manifest; any input file change invalidates.
+  reuses the cached summary; any raw-input change invalidates; the
+  structured Status section stays fresh on cache hits (e.g. a lock-state
+  change is reflected even when the summary is cached).
 - Item 3: `MANIFEST_MODEL` default + env override; `_haiku_summarize`
   passes it as `model`.
 - Item 6: assembled dispatch places `program.md` content before

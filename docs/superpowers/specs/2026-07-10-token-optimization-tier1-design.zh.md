@@ -38,7 +38,22 @@ EVIDENCE_CAP = int(os.environ.get("EVOLVE_EVIDENCE_CAP", "6000"))  # 字符
 `analyze_trajectory` 的矛盾→`noisy` 规则是兜底——即使截断偶尔让判定失真，
 也不会触发错误决策。
 
-## 第 2 项 —— Manifest 缓存（消除重复计算）
+## 第 0 项 —— 前置 bugfix：build_manifest 泄漏 build_lock
+
+**位置：** `prepare.py` 的 `build_manifest()`（约第 771 行）。
+
+**现状：** "build lock 状态"这一行是通过**真的调用**
+`acquire_build_lock()`（会实际拿锁）产生的，且从不释放。这是历史遗留泄
+漏，在旧的 120s 过期规则下能自愈；但本分支的 I3 修复把
+`BUILD_LOCK_STALE_SECONDS` 提到 1800 后，每次生成 manifest 都会把合并
+毒死最长 30 分钟。
+
+**改法：** 探测但不持有——`acquire_build_lock` 成功则立即
+`release_build_lock(evolve_dir, token)` 并报告 "free"；失败则报告锁定
+原因。回归测试：`build_manifest()` 之后，新的 `acquire_build_lock()`
+必须成功。
+
+## 第 2 项 —— Manifest 摘要缓存（消除重复计算）
 
 **位置：** `prepare.py` 的 `build_manifest()`。
 
@@ -46,15 +61,21 @@ EVIDENCE_CAP = int(os.environ.get("EVOLVE_EVIDENCE_CAP", "6000"))  # 字符
 上一轮以来什么都没变。1 分钟 cadence + 20 分钟构建在途的场景下，约 19 次
 调用是白费的。
 
-**改法：** 对 manifest 的输入源取指纹——
-`sha256(results.tsv 字节 + spec.md 字节 + 各 {feature}/strategy.md 字节)`
-（按路径排序读取；缺失文件用占位符参与）——存入 `.evolve/manifest.hash`。
-指纹匹配且 `.evolve/manifest.md` 存在时，直接返回现有 manifest，零 LLM
-调用。重新生成时，先写 manifest 再写新 hash。
+**改法——缓存摘要，绝不缓存整个 manifest。** manifest 的 `Status` /
+`Feature States` 段包含易变状态（锁持有者、`in_progress` 标记、基于时间
+的 should_stop），这些不依赖文件变化——缓存整个 manifest 会呈现过期状态，
+违反零功能变化约束。所以 manifest 每次都新鲜组装（便宜、确定性），只缓存
+昂贵的摘要调用：
 
-**为什么安全：** 指纹覆盖 manifest 摘要的全部输入源；任何状态变化必然触发
-重新生成。最坏失败模式是 hash 文件过期 → 多一次冗余重算，绝不会出现过期
-manifest。
+- 指纹 = `sha256(json of {round, phase, feature, raw_files})`，其中
+  `raw_files` 正是传给 `_haiku_summarize` 的那个 dict
+- 缓存文件 `.evolve/manifest_summary.json`：
+  `{"fingerprint": ..., "summary": ...}`
+- 指纹命中 → 复用缓存摘要，零 LLM 调用；未命中 → 重新摘要并覆写缓存
+
+**为什么安全：** 指纹覆盖摘要叙述的全部内容输入；易变的锁/时间状态从不
+进入摘要输入，且在结构化段落里永远重新计算。最坏失败模式是缓存文件损坏
+→ 多一次冗余摘要调用。
 
 ## 第 3 项 —— Manifest 摘要降级小模型（路由）
 
@@ -138,8 +159,11 @@ evidence、完整 commit log。session 后半程一次就是数万 token × 3 ×
 
 - 第 1 项：超限文件被截断且标记存在、头尾尺寸正确；未超限文件不动；
   cap=0 关闭截断。
+- 第 0 项：`build_manifest()` 之后，新的 `acquire_build_lock()` 成功
+  （无锁泄漏）。
 - 第 2 项：输入不变时第二次 `build_manifest` 不调用摘要器（monkeypatch
-  哨兵，被调即抛异常）并返回缓存的 manifest；任何输入文件变化使缓存失效。
+  哨兵，被调即抛异常）并复用缓存摘要；任何原始输入变化使缓存失效；缓存
+  命中时结构化 Status 段仍然新鲜（例如锁状态变化照常反映）。
 - 第 3 项：`MANIFEST_MODEL` 默认值 + 环境变量覆盖；`_haiku_summarize`
   以它作为 `model` 传参。
 - 第 6 项：组装出的 dispatch 中 program.md 内容在 strategy.md 内容之前、
