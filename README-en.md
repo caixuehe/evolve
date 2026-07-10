@@ -371,7 +371,7 @@ The 8 new lessons from the recap all landed in `.claude/memory/`:
 ## Running Tests
 
 ```bash
-python -m pytest tests/ -v    # 70 tests, ~0.1s
+python -m pytest tests/ -v    # 191 tests, ~2s
 ```
 
 ## License
