@@ -386,7 +386,16 @@ def should_stop(results_tsv: str, feature: str) -> tuple:
 # ---------------------------------------------------------------------------
 
 def get_evaluator() -> str | None:
-    """Try each evaluator in order, return first available CLI command. None = unavailable."""
+    """Return the independent evaluator CLI to use. None = unavailable.
+
+    EVOLVE_EVALUATOR forces a specific CLI (e.g. "claude" for the all-Claude
+    profile, or when a higher-priority CLI is installed but broken). The
+    forced CLI must exist on PATH; otherwise None. Without the override,
+    tries INDEPENDENT_EVALUATORS in priority order.
+    """
+    forced = os.environ.get("EVOLVE_EVALUATOR")
+    if forced:
+        return forced if shutil.which(forced) is not None else None
     for name in INDEPENDENT_EVALUATORS:
         if shutil.which(name) is not None:
             return name

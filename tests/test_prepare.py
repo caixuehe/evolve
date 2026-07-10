@@ -2100,3 +2100,23 @@ def test_dispatch_stability_ignores_section_suffix(tmp_path):
     content = Path(path).read_text()
     # program.md#A parses to program.md -> stable -> first
     assert content.index("SECTION-A") < content.index("STRATEGY-CONTENT")
+
+
+def test_get_evaluator_env_override(monkeypatch):
+    monkeypatch.setenv("EVOLVE_EVALUATOR", "claude")
+    monkeypatch.setattr("prepare.shutil.which",
+                        lambda n: "/usr/bin/" + n if n == "claude" else None)
+    assert get_evaluator() == "claude"
+
+
+def test_get_evaluator_env_override_missing_cli(monkeypatch):
+    monkeypatch.setenv("EVOLVE_EVALUATOR", "claude")
+    monkeypatch.setattr("prepare.shutil.which", lambda n: None)
+    assert get_evaluator() is None
+
+
+def test_get_evaluator_no_override_uses_priority(monkeypatch):
+    monkeypatch.delenv("EVOLVE_EVALUATOR", raising=False)
+    monkeypatch.setattr("prepare.shutil.which",
+                        lambda n: "/usr/bin/" + n if n == "codex" else None)
+    assert get_evaluator() == "codex"

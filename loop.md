@@ -221,6 +221,10 @@ To parallelize across features, wrap `dispatch_codex_agent()` in
 independent and C is expected to only touch its own feature's strategy.md +
 the shared append-only results.tsv.
 
+**All-Claude alternative:** set `EVOLVE_EVALUATOR=claude` and dispatch via
+`claude -p --model <model>` instead of codex exec — full profile (models per
+role, tradeoffs) in `docs/all-claude-profile.md`.
+
 Override the model / sandbox / timeout via env vars if needed:
 - `EVOLVE_CODEX_MODEL` (default `gpt-5.4-high`)
 - `EVOLVE_CODEX_SANDBOX` (default `workspace-write`; set to `danger-full-access` only if absolutely required)
