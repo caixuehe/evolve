@@ -9,6 +9,7 @@ Reference adapters in adapters/ are for Agent to read during Init, not imported 
 """
 
 import csv
+import hashlib
 import importlib.util
 import json
 import os
@@ -839,8 +840,34 @@ def build_manifest(evolve_dir: str) -> str:
         log_lines = log_path.read_text().strip().split("\n")
         raw_files["run.log (tail)"] = "\n".join(log_lines[-30:])
 
-    # Call Haiku
-    summary = _haiku_summarize(status_text, raw_files)
+    # Summary caching: the summary narrates raw_files + (round, phase,
+    # feature); volatile lock/timing state never enters its inputs. The
+    # structured sections above are ALWAYS recomputed — only the LLM call
+    # is skipped on a fingerprint hit.
+    fingerprint_src = json.dumps({
+        "round": progress["total_iterations"],
+        "phase": progress["phase"],
+        "feature": feature,
+        "raw": raw_files,
+    }, sort_keys=True)
+    fingerprint = hashlib.sha256(fingerprint_src.encode()).hexdigest()
+
+    cache_path = evolve_path / "manifest_summary.json"
+    summary = None
+    if cache_path.exists():
+        try:
+            cached = json.loads(cache_path.read_text())
+            if cached.get("fingerprint") == fingerprint:
+                summary = cached.get("summary")
+        except (json.JSONDecodeError, OSError):
+            pass
+    if summary is None:
+        summary = _haiku_summarize(status_text, raw_files)
+        try:
+            cache_path.write_text(json.dumps(
+                {"fingerprint": fingerprint, "summary": summary}))
+        except OSError:
+            pass
 
     manifest = (
         f"# Evolve Manifest\n\n"

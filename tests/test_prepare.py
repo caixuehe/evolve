@@ -1206,6 +1206,63 @@ def test_build_manifest_haiku_fallback(tmp_path):
     assert "## Summary" in manifest
 
 
+def _manifest_env(tmp_path):
+    evolve = tmp_path / ".evolve"
+    evolve.mkdir()
+    (evolve / "spec.md").write_text("- [ ] F01\n")
+    (evolve / "results.tsv").write_text(
+        "\t".join(HEADER_FIELDS) + "\n"
+        "a\tbuild\tF01\t-\t-\tkeep\tbuilt\t-\n")
+    return str(evolve)
+
+
+def test_manifest_summary_cached_on_unchanged_inputs(tmp_path, monkeypatch):
+    import prepare as prepare_mod
+    evolve = _manifest_env(tmp_path)
+    calls = []
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda s, f: calls.append(1) or "summary v1")
+    build_manifest(evolve)
+    assert len(calls) == 1
+
+    def _boom(s, f):
+        raise AssertionError("summarizer must not be called on cache hit")
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize", _boom)
+    manifest = build_manifest(evolve)          # unchanged inputs
+    assert "summary v1" in manifest            # cached summary reused
+
+
+def test_manifest_summary_invalidated_on_input_change(tmp_path, monkeypatch):
+    import prepare as prepare_mod
+    evolve = _manifest_env(tmp_path)
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda s, f: "summary v1")
+    build_manifest(evolve)
+    # new results.tsv row changes round -> fingerprint miss
+    append_result(str(Path(evolve) / "results.tsv"), {
+        "commit": "b", "phase": "eval", "feature": "F01",
+        "scores": "7/7", "total": "7.0", "status": "fail", "summary": "r1"})
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda s, f: "summary v2")
+    manifest = build_manifest(evolve)
+    assert "summary v2" in manifest
+
+
+def test_manifest_status_fresh_despite_summary_cache(tmp_path, monkeypatch):
+    import prepare as prepare_mod
+    evolve = _manifest_env(tmp_path)
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda s, f: "cached summary")
+    m1 = build_manifest(evolve)
+    assert "build_lock: free" in m1
+    # lock state changes WITHOUT any file input changing
+    bl = acquire_build_lock(evolve)
+    m2 = build_manifest(evolve)                # summary cache hit
+    assert "cached summary" in m2
+    assert "build_lock: locked" in m2          # Status recomputed fresh
+    release_build_lock(evolve, bl["token"])
+
+
 # ---------------------------------------------------------------------------
 # _parse_uncompleted_features tests
 # ---------------------------------------------------------------------------
