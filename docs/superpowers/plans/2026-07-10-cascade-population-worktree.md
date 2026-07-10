@@ -1913,8 +1913,12 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
       4. else outcome "none" (forced_pass gate opens; see can_force_pass).
 
     Marks branching.json completed and records winner_outcome.
-    On "adopt": resets the incumbent feature branch to the winner and
-    appends a status=reset row so fail counting restarts.
+    On "pass" AND "adopt": resets the incumbent feature branch to the
+    winner's branch — so the standard merge_feature(feature) path works
+    afterwards and EVERY candidate branch can be safely cleaned up here
+    (otherwise a pass-winner's branch would be deleted before O merges it).
+    On "adopt" additionally appends a status=reset row so fail counting
+    restarts.
     """
     import csv as _csv
     from prepare import append_result
@@ -1968,10 +1972,14 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
     state["winner"] = cand["feature_id"] if cand else None
     _write_branching_state(evolve_dir, feature, state)
 
-    if outcome == "adopt":
+    if outcome in ("pass", "adopt"):
+        # Point the incumbent feature branch at the winner. After this,
+        # the winner's commits live on the feature branch, so all
+        # candidate branches (including the winner's) are safe to delete
+        # below, and O merges via the standard merge_feature(feature).
         root = _repo_root(evolve_dir)
         incumbent_branch = feature_branch(evolve_dir, feature)
-        if _git(["rev-parse", "--verify", incumbent_branch],
+        if _git(["rev-parse", "--verify", "refs/heads/" + incumbent_branch],
                 root).returncode == 0:
             # Feature worktree must not hold the branch while we move it.
             remove_feature_worktree(evolve_dir, feature,
@@ -1979,16 +1987,16 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
             _git(["branch", "-f", incumbent_branch, cand["branch"]], root)
         else:
             _git(["branch", incumbent_branch, cand["branch"]], root)
-        append_result(str(tsv), {
-            "commit": "-", "phase": "build", "feature": feature,
-            "scores": "-", "total": "-", "status": "reset",
-            "summary": f"adopted candidate {cand['cand_id']} lineage "
-                       f"({cand['branch']})",
-        })
+        if outcome == "adopt":
+            append_result(str(tsv), {
+                "commit": "-", "phase": "build", "feature": feature,
+                "scores": "-", "total": "-", "status": "reset",
+                "summary": f"adopted candidate {cand['cand_id']} lineage "
+                           f"({cand['branch']})",
+            })
 
-    # Loser cleanup: remove all candidate worktrees except an adopted
-    # winner's branch source (its commits now live on the incumbent branch,
-    # so its worktree can go too).
+    # Candidate cleanup: every candidate worktree+branch goes. Safe even
+    # for the winner — its commits now live on the incumbent branch.
     for c in state["candidates"]:
         cand_name = f"{feature_slug(feature)}-cand{c['cand_id']}"
         remove_feature_worktree(evolve_dir, cand_name)
@@ -1999,7 +2007,7 @@ def select_candidate(evolve_dir: str, feature: str) -> dict:
             "detail": f"winner_outcome={outcome}"}
 ```
 
-Note for the runtime flow (documented in Task 13's loop.md edits, not code): on `outcome == "pass"` O merges the winning branch via `merge_feature(evolve_dir, feature, branch=cand["branch"])` and appends the parent's pass row.
+Note for the runtime flow (documented in Task 14's loop.md edits, not code): on `outcome == "pass"` the feature branch already points at the winner, so O merges via the standard `merge_feature(evolve_dir, feature, cascade_stages=stages)` and appends the parent's pass row. The `branch=` override on merge_feature stays available for other uses but is not needed here.
 
 - [ ] **Step 4: Run the full suite**
 
@@ -2320,8 +2328,9 @@ When every candidate has an eval row, close the round:
 ```python
 result = select_candidate(".evolve", feat["name"])
 if result["outcome"] == "pass":
-    # merge the winning candidate branch under the parent feature's name
-    merge_feature(".evolve", feat["name"], branch=winner_branch)
+    # select_candidate already reset the feature branch to the winner —
+    # merge through the standard integration gate:
+    merge_feature(".evolve", feat["name"], cascade_stages=stages)
     # then append the parent's eval/pass row
 elif result["outcome"] == "adopt":
     # lineage was reset to the best candidate; feature returns to needs_build
