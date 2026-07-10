@@ -1891,3 +1891,39 @@ def test_build_manifest_does_not_leak_build_lock(tmp_path, monkeypatch):
     bl = acquire_build_lock(str(evolve))
     assert bl["acquired"] is True
     release_build_lock(str(evolve), bl["token"])
+
+
+def test_truncate_evidence_over_cap():
+    from prepare import _truncate_evidence
+    content = "H" * 2000 + "M" * 20000 + "T" * 6000
+    out = _truncate_evidence(content, 6000)
+    assert out.startswith("H" * 1000)
+    assert out.endswith("T" * 5000)
+    assert "truncated" in out
+    assert str(len(content) - 6000) in out
+
+
+def test_truncate_evidence_under_cap_untouched():
+    from prepare import _truncate_evidence
+    content = "short evidence"
+    assert _truncate_evidence(content, 6000) == content
+
+
+def test_truncate_evidence_cap_zero_disables():
+    from prepare import _truncate_evidence
+    content = "X" * 50000
+    assert _truncate_evidence(content, 0) == content
+
+
+def test_prepare_dispatch_truncates_previous_evidence(tmp_path):
+    evolve = tmp_path / ".evolve"
+    feat_dir = evolve / "F01"
+    feat_dir.mkdir(parents=True)
+    (evolve / "program.md").write_text("# Program\ngoal\n")
+    (feat_dir / "eval_codex.md").write_text("A" * 1000 + "B" * 20000 +
+                                            "Z" * 5000)
+    path = prepare_dispatch(str(evolve), "C", ["program.md"], feature="F01")
+    content = Path(path).read_text()
+    assert "truncated" in content
+    assert "B" * 20000 not in content        # middle removed
+    assert content.rstrip().endswith("Z" * 5000)  # tail kept (evidence is last)

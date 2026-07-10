@@ -49,6 +49,9 @@ HELPER_MODEL = os.environ.get(
 HAIKU_MODEL = HELPER_MODEL  # alias for backward compat — remove once all refs migrated
 AGENT_MODEL = os.environ.get("EVOLVE_AGENT_MODEL", "gpt-5.4-high")
 
+# Previous Round Evidence cap (chars). 0 disables truncation.
+EVIDENCE_CAP = int(os.environ.get("EVOLVE_EVIDENCE_CAP", "6000"))
+
 REQUIRED_ADAPTER_FUNCTIONS = ["setup", "run_checks", "teardown"]
 
 
@@ -916,6 +919,21 @@ def _extract_section(content: str, section_name: str) -> str:
     return "\n".join(lines[start_idx:end_idx]).rstrip()
 
 
+def _truncate_evidence(content: str, cap: int) -> str:
+    """Head+tail truncation for previous-round judge output.
+
+    Judge files put dimension scores at the head and conclusions/rationale
+    at the tail; the middle is process transcript. Keep the first 1,000
+    chars + the last (cap - 1000), with an explicit marker. cap <= 0
+    disables truncation.
+    """
+    if cap <= 0 or len(content) <= cap:
+        return content
+    head, tail = content[:1000], content[-(cap - 1000):]
+    return (f"{head}\n\n[... truncated {len(content) - cap} chars ...]\n\n"
+            f"{tail}")
+
+
 def prepare_dispatch(evolve_dir: str, target: str, file_list: list,
                      note: str = "", feature: str = None) -> str:
     """
@@ -983,7 +1001,7 @@ def prepare_dispatch(evolve_dir: str, target: str, file_list: list,
                     "better|same|worse` per dimension (recorded in "
                     "results.tsv's pairwise column). Pass/fail stays on "
                     "absolute scores; pairwise feeds trajectory analysis.\n\n"
-                    f"{prev_eval.read_text()}\n"
+                    f"{_truncate_evidence(prev_eval.read_text(), EVIDENCE_CAP)}\n"
                 )
                 break
 
