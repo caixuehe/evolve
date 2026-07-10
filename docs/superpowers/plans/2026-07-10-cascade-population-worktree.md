@@ -872,7 +872,7 @@ git push
 - Test: `tests/test_worktree.py`
 
 **Interfaces:**
-- Produces: `feature_slug(feature) -> str`; `base_branch(evolve_dir) -> str`; `feature_branch(evolve_dir, feature) -> str` (`"{base}/{slug}"`); `worktree_path(evolve_dir, feature) -> str` (`"{evolve_dir}/worktrees/{slug}"`); `create_feature_worktree(evolve_dir, feature, from_branch=None) -> {"path", "branch", "created"}`; `remove_feature_worktree(evolve_dir, feature, delete_branch=True)`. Assumption (documented): these are called from the main working tree, which sits on the `evolve/<tag>` branch.
+- Produces: `feature_slug(feature) -> str`; `base_branch(evolve_dir) -> str`; `feature_branch(evolve_dir, feature) -> str` (`"{base}--{slug}"` — sibling ref; git cannot create `X/Y` when branch `X` exists); `worktree_path(evolve_dir, feature) -> str` (`"{evolve_dir}/worktrees/{slug}"`); `create_feature_worktree(evolve_dir, feature, from_branch=None) -> {"path", "branch", "created"}`; `remove_feature_worktree(evolve_dir, feature, delete_branch=True)`. Assumption (documented): these are called from the main working tree, which sits on the `evolve/<tag>` branch.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -914,7 +914,7 @@ def test_feature_slug_sanitizes():
 def test_branch_and_path_naming(tmp_path):
     evolve = _git_repo(tmp_path)
     assert base_branch(evolve) == "evolve/demo"
-    assert feature_branch(evolve, "F01 auth") == "evolve/demo/F01-auth"
+    assert feature_branch(evolve, "F01 auth") == "evolve/demo--F01-auth"
     assert worktree_path(evolve, "F01 auth").endswith(
         ".evolve/worktrees/F01-auth")
 
@@ -926,7 +926,7 @@ def test_create_and_remove_worktree(tmp_path):
     assert Path(wt["path"], "app.txt").exists()
     # branch exists
     r = subprocess.run(["git", "rev-parse", "--verify",
-                        "evolve/demo/F01-auth"],
+                        "evolve/demo--F01-auth"],
                        cwd=tmp_path, capture_output=True)
     assert r.returncode == 0
     # idempotent
@@ -937,7 +937,7 @@ def test_create_and_remove_worktree(tmp_path):
     remove_feature_worktree(evolve, "F01 auth")
     assert not Path(wt["path"]).exists()
     r = subprocess.run(["git", "rev-parse", "--verify",
-                        "evolve/demo/F01-auth"],
+                        "evolve/demo--F01-auth"],
                        cwd=tmp_path, capture_output=True)
     assert r.returncode != 0            # branch deleted too
 
@@ -946,7 +946,7 @@ def test_create_from_explicit_branch(tmp_path):
     evolve = _git_repo(tmp_path)
     _run(["git", "branch", "other-base"], tmp_path)
     wt = create_feature_worktree(evolve, "F02", from_branch="other-base")
-    assert wt["branch"] == "evolve/demo/F02"
+    assert wt["branch"] == "evolve/demo--F02"
     assert Path(wt["path"]).exists()
 ```
 
@@ -963,7 +963,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'worktree'`
 worktree.py -- Git worktree isolation for parallel Builders.
 
 Each feature's B works in .evolve/worktrees/{slug} on branch
-{base}/{slug}, where {base} is the evolve/<tag> branch of the MAIN
+{base}--{slug}, where {base} is the evolve/<tag> branch of the MAIN
 working tree. All functions here must be called from the main working
 tree, not from inside a worktree.
 
@@ -1003,7 +1003,7 @@ def base_branch(evolve_dir: str) -> str:
 
 
 def feature_branch(evolve_dir: str, feature: str) -> str:
-    return f"{base_branch(evolve_dir)}/{feature_slug(feature)}"
+    return f"{base_branch(evolve_dir)}--{feature_slug(feature)}"
 
 
 def worktree_path(evolve_dir: str, feature: str) -> str:
@@ -2391,7 +2391,7 @@ cannot run against a broken build.
 
 ```markdown
 1. **B parallel via worktrees**: each feature's B works in
-   `.evolve/worktrees/{slug}` on branch `evolve/<tag>/{slug}`; build_lock
+   `.evolve/worktrees/{slug}` on branch `evolve/<tag>--{slug}`; build_lock
    only serializes merges into evolve/<tag>
 ```
 

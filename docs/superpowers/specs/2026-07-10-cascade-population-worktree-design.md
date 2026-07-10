@@ -89,7 +89,8 @@ stable. prepare.py (1,340 lines) must not grow materially.
 ## Part 2 — Worktree isolation (`worktree.py`)
 
 - Each feature's B works in `.evolve/worktrees/{feature}` on branch
-  `evolve/<tag>/{feature}`, created by
+  `evolve/<tag>--{feature}` (sibling ref: git cannot nest a branch
+  under an existing branch name), created by
   `create_feature_worktree(evolve_dir, feature) -> path`.
 - **build_lock semantics change:** no longer "one B at a time". It now
   serializes only the true critical section — merging into `evolve/<tag>`.
@@ -111,7 +112,7 @@ stable. prepare.py (1,340 lines) must not grow materially.
   `web_app.py` demonstrates per-slot PORT offsets. Adapters without it are
   assumed conflict-free (docs/teaching adapters).
 - **Leak cleanup:** `acquire_lock()` prunes stale worktrees and
-  `evolve/<tag>/*` branches whose feature is `completed` or whose lock is
+  `evolve/<tag>--*` branches whose feature is `completed` or whose lock is
   expired (crashed sessions leave no debris).
 
 ## Part 3 — Population branching (`population.py`) + gated forced_pass
@@ -135,7 +136,7 @@ the user declines forced_pass — it remains the terminal skip state.
 
 - `spawn_candidates(evolve_dir, feature, n=3) -> list[dict]` forks N
   worktrees `.evolve/worktrees/{feature}-cand{i}` on branches
-  `evolve/<tag>/cand/{feature}/{i}` from the feature's current branch. Each
+  `evolve/<tag>--{feature}-cand{i}` from the feature's current branch. Each
   candidate's `strategy.md` is seeded with a **distinct approach**, drawn
   from Mentor hypotheses and C's untried Pivot options; O writes the seeds.
 - O dispatches N parallel B→C chains, one per candidate worktree (reuses
