@@ -6,7 +6,7 @@
 **Define a goal. AI builds, evaluates, and iterates until it's met.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-191%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-210%20passed-brightgreen.svg)]()
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)]()
 
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill. You define what you want and what "good" looks like. AI writes the code, scores it, and fixes what doesn't pass -- on repeat, until everything does. Inspired by [Anthropic's harness design](https://www.anthropic.com/engineering/harness-design-long-running-apps) and [Karpathy's autoresearch](https://github.com/karpathy/autoresearch).
@@ -195,6 +195,15 @@ You ↔ O ──dispatch──┬──> H (Sonnet): prep context
 | `teaching.py` | Educational content | All LLM-judged |
 | `chat_agent.py` | Chat agents ([OpenClaw](https://github.com/nicepkg/openclaw)) | Simulated conversations + LLM-judged |
 
+
+**Model configuration** — defaults: B/C via codex (gpt-5.4-high), H on Sonnet,
+M on Opus. For an all-Claude alternative (B=Fable 5 / C=Opus 4.8 / H=Sonnet 5)
+see [docs/all-claude-profile.md](./docs/all-claude-profile.md).
+Token-efficiency knobs: `EVOLVE_EVIDENCE_CAP` (previous-round evidence cap,
+default 6000 chars) and `EVOLVE_MANIFEST_MODEL` (manifest summary model,
+default Haiku); the manifest summary is fingerprint-cached — no-change rounds
+make zero LLM calls.
+
 ---
 
 ## How to Talk to O (Battle-tested)
@@ -371,7 +380,7 @@ The 8 new lessons from the recap all landed in `.claude/memory/`:
 ## Running Tests
 
 ```bash
-python -m pytest tests/ -v    # 191 tests, ~6s
+python -m pytest tests/ -v    # 210 tests, ~6s
 ```
 
 ## License

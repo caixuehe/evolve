@@ -6,7 +6,7 @@
 **定义目标，AI 自动构建、评估、迭代，直到达标。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-191%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-210%20passed-brightgreen.svg)]()
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)]()
 
 一个 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) Skill。你定义想要什么和怎么算好，AI 自己写代码、自己打分、不及格自己改，直到过线。灵感来自 [Anthropic 的 harness design](https://www.anthropic.com/engineering/harness-design-long-running-apps) 和 [Karpathy 的 autoresearch](https://github.com/karpathy/autoresearch)。
@@ -195,6 +195,13 @@ git log --oneline evolve/rest-api
 | `teaching.py` | 教学内容 | 全 LLM 打分 |
 | `chat_agent.py` | 对话 AI agent（[OpenClaw](https://github.com/nicepkg/openclaw)） | 模拟对话 + LLM 打分 |
 
+**模型配置** —— 默认 B/C 走 codex（gpt-5.4-high）、H 用 Sonnet、M 用 Opus。
+全 Claude 家族的替代配置（B=Fable 5 / C=Opus 4.8 / H=Sonnet 5）见
+[docs/all-claude-profile.md](./docs/all-claude-profile.md)。
+Token 效率旋钮：`EVOLVE_EVIDENCE_CAP`（上轮证据截断，默认 6000 字符）、
+`EVOLVE_MANIFEST_MODEL`（manifest 摘要模型，默认 Haiku）；manifest 摘要
+带指纹缓存，无变化轮零 LLM 调用。
+
 ---
 
 ## 如何与 O 交互（实战版）
@@ -369,7 +376,7 @@ evolve 本质是个长跑游戏，会出岔子。以下是手动干预：
 ## 运行测试
 
 ```bash
-python -m pytest tests/ -v    # 191 个测试，约 6 秒
+python -m pytest tests/ -v    # 210 个测试，约 6 秒
 ```
 
 ## 许可证
