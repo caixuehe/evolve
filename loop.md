@@ -152,7 +152,7 @@ for feat in features:
 
 After the Agent returns, it will have written
 `.evolve/features/{feat}/mentor_advice_{n}.md`.  The next round's
-`build_dispatch_B` and `build_dispatch_C` automatically prepend this file
+`build_dispatch_B` and `build_dispatch_C` automatically include this file
 so B and C see the advice.  O does not need to thread anything manually.
 
 **Mentor concurrency:** multiple M agents can run in parallel across

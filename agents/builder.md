@@ -74,7 +74,7 @@ When strategy.md says `mode: fix` or omits the field:
 
 ## Mentor Advice (if present in your dispatch)
 
-When `dispatch_B.md` contains a `## Mentor Advice` section at the top, a
+When `dispatch_B.md` contains a `## Mentor Advice` section included in your dispatch, a
 mentor (Claude Opus, second opinion) has reviewed the feature's full
 history.  Follow the "Advice for B" bullets **before** anything else in
 your normal flow.  If you disagree with the advice:

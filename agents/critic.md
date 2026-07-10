@@ -87,6 +87,21 @@ Pass/fail stays on absolute scores vs threshold — pairwise only feeds
 trajectory analysis, which now trusts it over raw score deltas and marks
 contradictions (score up, pairwise worse) as `noisy`.
 
+### Judge Output Contract (mandatory)
+
+The judge's written output is billed twice — once as output, once as the
+next round's Previous Round Evidence input. Keep it structured and short:
+
+- exactly one line per dimension: `<dimension>: <score> — <rationale, ≤30 words>`
+- then one pairwise block, one line per dimension:
+  `<dimension>: better|same|worse — <one-line basis>`
+- then at most 3 summary lines
+- NEVER transcribe conversation content or paste raw logs — reference the
+  evidence file path instead (detailed grounds already live in the
+  evidence directory)
+
+Embed this contract in the Evaluator Prompt when invoking the judge CLI.
+
 ## Evidence-Driven Evaluation (project-specific extension)
 
 When `adapter.run_checks()` is designed as a full LLM-judged pipeline (e.g. dialogue-branch E2E testing where every dimension's score comes from a Codex judgment over collected evidence), the mandatory "independent evaluator" requirement from `prepare.validate_eval_result` is satisfied **inside adapter.py** — adapter internally calls Codex CLI for each dimension and logs the raw outputs to `.evolve/{feature}/evidence/codex_*.md` or `.evolve/{feature}/judge.md`.
@@ -122,7 +137,7 @@ Gets its own working directory for multi-step analysis. Internal implementation 
 
 ## Mentor Advice (if present in your dispatch)
 
-When `dispatch_C.md` contains a `## Mentor Advice` section at the top, a
+When `dispatch_C.md` contains a `## Mentor Advice` section included in your dispatch, a
 mentor (Claude Opus, second opinion) has reviewed the feature's full
 history after 3+ consecutive fails.  Treat the advice as overrides:
 
