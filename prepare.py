@@ -60,6 +60,11 @@ try:
 except ValueError:
     EVIDENCE_CAP = 6000  # malformed env value must not break the engine
 
+# Dispatch section ordering: stable-content-first is prompt-cache
+# friendly (a volatile first section invalidates any prefix cache at
+# byte 1). Stability judged on the parsed filename's basename.
+STABLE_DISPATCH_FILES = {"program.md", "eval.yml", "spec.md", "adapter.py"}
+
 REQUIRED_ADAPTER_FUNCTIONS = ["setup", "run_checks", "teardown"]
 
 
@@ -999,12 +1004,16 @@ def prepare_dispatch(evolve_dir: str, target: str, file_list: list,
     else:
         output_dir = evolve_path
 
+    def _is_stable(file_spec: str) -> bool:
+        filename, _ = _parse_file_spec(file_spec)
+        return Path(filename).name in STABLE_DISPATCH_FILES
+
+    ordered_specs = ([s for s in file_list if _is_stable(s)] +
+                     [s for s in file_list if not _is_stable(s)])
+
     sections = [f"# Dispatch: {target}\n"]
 
-    if note:
-        sections.append(f"## Note from O\n{note}\n")
-
-    for file_spec in file_list:
+    for file_spec in ordered_specs:
         filename, content_slice = _parse_file_spec(file_spec)
 
         filepath = evolve_path / filename
@@ -1027,6 +1036,10 @@ def prepare_dispatch(evolve_dir: str, target: str, file_list: list,
                 content = "\n".join(lines[-50:])
 
         sections.append(f"## {file_spec}\n{content}\n")
+
+    # Volatile sections LAST (cache-friendly ordering)
+    if note:
+        sections.append(f"## Note from O\n{note}\n")
 
     # C only: previous round's judge output enables pairwise verdicts.
     if target == "C" and feature:

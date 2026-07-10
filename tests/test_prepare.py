@@ -2055,3 +2055,48 @@ def test_haiku_summarize_uses_manifest_model(monkeypatch):
     out = prepare_mod._haiku_summarize("status", {"f": "content"})
     assert out == "fake summary"
     assert captured["model"] == prepare_mod.MANIFEST_MODEL
+
+
+# ---------------------------------------------------------------------------
+# Cache-friendly dispatch ordering tests
+# ---------------------------------------------------------------------------
+
+def test_dispatch_stable_files_first_note_after(tmp_path):
+    evolve = tmp_path / ".evolve"
+    (evolve / "F01").mkdir(parents=True)
+    (evolve / "program.md").write_text("PROGRAM-CONTENT")
+    (evolve / "F01" / "strategy.md").write_text("STRATEGY-CONTENT")
+    path = prepare_dispatch(str(evolve), "B",
+                            ["F01/strategy.md", "program.md"],
+                            note="VOLATILE-NOTE", feature="F01")
+    content = Path(path).read_text()
+    # stable file first even though listed second
+    assert content.index("PROGRAM-CONTENT") < content.index("STRATEGY-CONTENT")
+    # volatile note after ALL file sections
+    assert content.index("VOLATILE-NOTE") > content.index("STRATEGY-CONTENT")
+
+
+def test_dispatch_evidence_stays_last(tmp_path):
+    evolve = tmp_path / ".evolve"
+    feat = evolve / "F01"
+    feat.mkdir(parents=True)
+    (evolve / "program.md").write_text("PROGRAM-CONTENT")
+    (feat / "eval_codex.md").write_text("EVIDENCE-CONTENT")
+    path = prepare_dispatch(str(evolve), "C", ["program.md"],
+                            note="VOLATILE-NOTE", feature="F01")
+    content = Path(path).read_text()
+    assert content.index("VOLATILE-NOTE") > content.index("PROGRAM-CONTENT")
+    assert content.index("EVIDENCE-CONTENT") > content.index("VOLATILE-NOTE")
+
+
+def test_dispatch_stability_ignores_section_suffix(tmp_path):
+    evolve = tmp_path / ".evolve"
+    (evolve / "F01").mkdir(parents=True)
+    (evolve / "program.md").write_text("# A\nSECTION-A\n# B\nSECTION-B\n")
+    (evolve / "F01" / "strategy.md").write_text("STRATEGY-CONTENT")
+    path = prepare_dispatch(str(evolve), "B",
+                            ["F01/strategy.md", "program.md#A"],
+                            feature="F01")
+    content = Path(path).read_text()
+    # program.md#A parses to program.md -> stable -> first
+    assert content.index("SECTION-A") < content.index("STRATEGY-CONTENT")
