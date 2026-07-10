@@ -369,7 +369,7 @@ evolve 本质是个长跑游戏，会出岔子。以下是手动干预：
 ## 运行测试
 
 ```bash
-python -m pytest tests/ -v    # 191 个测试，约 2 秒
+python -m pytest tests/ -v    # 191 个测试，约 6 秒
 ```
 
 ## 许可证
