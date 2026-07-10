@@ -17,6 +17,12 @@
 - Do not modify program.md
 - Do not modify prepare.py or evaluation infrastructure
 - One commit per run (not per feature — finer rollback granularity)
+- **Never commit build artifacts** (`__pycache__/`, `*.pyc`, `node_modules/`,
+  `dist/`, `.next/`, coverage output). Before `git add -A`, confirm
+  `.gitignore` covers your stack's cache/output dirs — add the entries if
+  missing. Tracked artifacts poison the integration merge gate for every
+  parallel feature (smoke-tested failure mode: a committed `__pycache__`
+  blocked all later merges with "local changes would be overwritten").
 - **Output volume control (soft limit):**
   - Default budget: ≤ 350 net new lines of code, ≤ 5 changed files per run
   - Prefer reusing existing code, patterns, and utilities over generating from scratch
