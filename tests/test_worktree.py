@@ -166,3 +166,42 @@ def test_acquire_lock_prunes_best_effort(tmp_path):
     lock = acquire_lock(str(evolve))
     assert lock["acquired"] is True
     release_lock(str(evolve))
+
+
+def test_prune_keeps_unmerged_completed_branch(tmp_path):
+    evolve = _git_repo(tmp_path)
+    (Path(evolve) / "spec.md").write_text("- [ ] F01\n")
+    header = "commit\tphase\tfeature\tscores\ttotal\tstatus\tsummary"
+    (Path(evolve) / "results.tsv").write_text(
+        header + "\n" + "a\teval\tF01\t9/9\t9.0\tpass\tdone\n")
+    wt = create_feature_worktree(evolve, "F01")
+    _commit_in_worktree(wt["path"], "unmerged.txt", "work\n", "feat: F01")
+
+    removed = prune_stale_worktrees(evolve)
+    assert removed == []                       # unmerged -> kept
+    assert Path(wt["path"]).exists()
+
+
+def test_prune_isolates_per_entry_failures(tmp_path, monkeypatch):
+    evolve = _git_repo(tmp_path)
+    (Path(evolve) / "spec.md").write_text("- [ ] F01\n- [ ] F02\n")
+    header = "commit\tphase\tfeature\tscores\ttotal\tstatus\tsummary"
+    (Path(evolve) / "results.tsv").write_text(
+        header + "\n"
+        "a\teval\tF01\t9/9\t9.0\tpass\tdone\n"
+        "b\teval\tF02\t9/9\t9.0\tpass\tdone\n")
+    create_feature_worktree(evolve, "F01")
+    wt2 = create_feature_worktree(evolve, "F02")
+
+    import worktree as wt_mod
+    real_remove = wt_mod.remove_feature_worktree
+
+    def flaky_remove(evolve_dir, feature, delete_branch=True):
+        if feature == "F01":
+            raise RuntimeError("simulated locked worktree")
+        return real_remove(evolve_dir, feature, delete_branch)
+
+    monkeypatch.setattr(wt_mod, "remove_feature_worktree", flaky_remove)
+    removed = prune_stale_worktrees(evolve)   # must not raise
+    assert removed == ["F02"]
+    assert not Path(wt2["path"]).exists()

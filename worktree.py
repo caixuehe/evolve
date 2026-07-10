@@ -180,9 +180,15 @@ def prune_stale_worktrees(evolve_dir: str) -> list:
     """Remove worktree debris: git-level pruning plus worktrees whose
     feature is already completed. Returns list of removed slugs.
 
-    Safe to call every round: branches hold all committed state, so
-    removing a worktree loses at most a crashed B's uncommitted edits —
-    which is exactly the debris this cleans up.
+    A "completed" feature (eval pass in results.tsv) does not imply its
+    branch is merged into the base branch -- a session can crash between
+    eval pass and merge, leaving committed work only on the feature
+    branch. Only remove a completed entry's worktree+branch when
+    `git merge-base --is-ancestor` confirms the branch is fully contained
+    in the base branch; otherwise leave the worktree and branch intact
+    for the orchestrator to merge later. Per-entry removal failures are
+    swallowed (best-effort): one entry's failure never aborts cleanup of
+    the others.
     """
     from prepare import scan_all_features
 
@@ -198,8 +204,22 @@ def prune_stale_worktrees(evolve_dir: str) -> list:
                  for f in scan_all_features(evolve_dir)
                  if f["state"] == "completed"}
 
+    base = base_branch(evolve_dir)
+
     for entry in wt_root.iterdir():
-        if entry.is_dir() and entry.name in completed:
+        if not (entry.is_dir() and entry.name in completed):
+            continue
+
+        branch = feature_branch(evolve_dir, entry.name)
+        merged = _git(
+            ["merge-base", "--is-ancestor", f"refs/heads/{branch}", base],
+            root).returncode == 0
+        if not merged:
+            continue
+
+        try:
             remove_feature_worktree(evolve_dir, entry.name)
             removed.append(entry.name)
+        except Exception:
+            pass
     return removed
