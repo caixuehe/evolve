@@ -68,3 +68,16 @@ def test_create_from_explicit_branch(tmp_path):
     wt = create_feature_worktree(evolve, "F02", from_branch="other-base")
     assert wt["branch"] == "evolve/demo--F02"
     assert Path(wt["path"]).exists()
+
+
+def test_remove_nonexistent_worktree_is_noop(tmp_path):
+    evolve = _git_repo(tmp_path)
+    # never created — must not raise
+    remove_feature_worktree(evolve, "GHOST")
+
+
+def test_remove_is_idempotent(tmp_path):
+    evolve = _git_repo(tmp_path)
+    create_feature_worktree(evolve, "F01")
+    remove_feature_worktree(evolve, "F01")
+    remove_feature_worktree(evolve, "F01")   # second call must not raise

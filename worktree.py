@@ -15,6 +15,7 @@ function bodies (prepare re-exports this module at its end).
 import re
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 
 def _repo_root(evolve_dir: str) -> str:
@@ -50,7 +51,7 @@ def worktree_path(evolve_dir: str, feature: str) -> str:
 
 
 def create_feature_worktree(evolve_dir: str, feature: str,
-                            from_branch: str = None) -> dict:
+                            from_branch: Optional[str] = None) -> dict:
     """Create (or reuse) the worktree + branch for a feature.
 
     Returns {"path": str, "branch": str, "created": bool}.
@@ -65,7 +66,8 @@ def create_feature_worktree(evolve_dir: str, feature: str,
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-    if _git(["rev-parse", "--verify", branch], root).returncode != 0:
+    if _git(["rev-parse", "--verify", "refs/heads/" + branch],
+            root).returncode != 0:
         start = from_branch or base_branch(evolve_dir)
         proc = _git(["branch", branch, start], root)
         if proc.returncode != 0:
@@ -80,10 +82,34 @@ def create_feature_worktree(evolve_dir: str, feature: str,
 
 def remove_feature_worktree(evolve_dir: str, feature: str,
                             delete_branch: bool = True) -> None:
-    """Remove a feature's worktree (and branch). Idempotent."""
+    """Remove a feature's worktree (and branch). Idempotent.
+
+    Removing an already-missing worktree/branch is a no-op, but real
+    git failures (e.g. dirty/locked worktree) raise RuntimeError with
+    the underlying stderr.
+    """
     root = _repo_root(evolve_dir)
     path = worktree_path(evolve_dir, feature)
-    _git(["worktree", "remove", "--force", path], root)
+
+    proc = _git(["worktree", "remove", "--force", path], root)
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        stderr_lower = stderr.lower()
+        already_gone = (
+            not Path(path).exists()
+            or "is not a working tree" in stderr_lower
+            or "no such file or directory" in stderr_lower
+        )
+        if not already_gone:
+            raise RuntimeError(f"git worktree remove failed: {stderr}")
+
+    # Best-effort advisory cleanup; failures here are not actionable.
     _git(["worktree", "prune"], root)
+
     if delete_branch:
-        _git(["branch", "-D", feature_branch(evolve_dir, feature)], root)
+        branch = feature_branch(evolve_dir, feature)
+        proc = _git(["branch", "-D", branch], root)
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip()
+            if "not found" not in stderr.lower():
+                raise RuntimeError(f"git branch -D failed: {stderr}")
