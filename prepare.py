@@ -928,6 +928,22 @@ def prepare_dispatch(evolve_dir: str, target: str, file_list: list,
 
         sections.append(f"## {file_spec}\n{content}\n")
 
+    # C only: previous round's judge output enables pairwise verdicts.
+    if target == "C" and feature:
+        for eval_name in ("eval_codex.md", "eval_agent.md", "eval_claude.md"):
+            prev_eval = evolve_path / feature / eval_name
+            if prev_eval.exists():
+                sections.append(
+                    "## Previous Round Evidence\n"
+                    "For EVERY dimension, judge this round against the "
+                    "previous one below and emit `pairwise: "
+                    "better|same|worse` per dimension (recorded in "
+                    "results.tsv's pairwise column). Pass/fail stays on "
+                    "absolute scores; pairwise feeds trajectory analysis.\n\n"
+                    f"{prev_eval.read_text()}\n"
+                )
+                break
+
     dispatch_path = output_dir / f"dispatch_{target}.md"
     dispatch_path.write_text("\n".join(sections))
     return str(dispatch_path)

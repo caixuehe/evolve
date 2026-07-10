@@ -1738,3 +1738,37 @@ def test_analyze_trajectory_no_pairwise_falls_back_to_scores(tmp_path):
         assert analyze_trajectory(path, "F01")["trend"] == "flat"
     finally:
         os.unlink(path)
+
+
+def test_prepare_dispatch_c_includes_previous_evidence(tmp_path):
+    evolve = tmp_path / ".evolve"
+    feat_dir = evolve / "F01"
+    feat_dir.mkdir(parents=True)
+    (evolve / "program.md").write_text("# Program\ngoal\n")
+    (feat_dir / "eval_codex.md").write_text("previous judge rationale here")
+
+    path = prepare_dispatch(str(evolve), "C", ["program.md"], feature="F01")
+    content = Path(path).read_text()
+    assert "## Previous Round Evidence" in content
+    assert "previous judge rationale here" in content
+    assert "pairwise" in content            # instruction to emit verdicts
+
+
+def test_prepare_dispatch_c_no_evidence_first_round(tmp_path):
+    evolve = tmp_path / ".evolve"
+    (evolve / "F01").mkdir(parents=True)
+    (evolve / "program.md").write_text("# Program\ngoal\n")
+
+    path = prepare_dispatch(str(evolve), "C", ["program.md"], feature="F01")
+    assert "## Previous Round Evidence" not in Path(path).read_text()
+
+
+def test_prepare_dispatch_b_never_gets_evidence(tmp_path):
+    evolve = tmp_path / ".evolve"
+    feat_dir = evolve / "F01"
+    feat_dir.mkdir(parents=True)
+    (evolve / "program.md").write_text("# Program\ngoal\n")
+    (feat_dir / "eval_codex.md").write_text("judge output")
+
+    path = prepare_dispatch(str(evolve), "B", ["program.md"], feature="F01")
+    assert "## Previous Round Evidence" not in Path(path).read_text()
