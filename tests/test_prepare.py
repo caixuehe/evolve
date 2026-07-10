@@ -1263,6 +1263,29 @@ def test_manifest_status_fresh_despite_summary_cache(tmp_path, monkeypatch):
     release_build_lock(evolve, bl["token"])
 
 
+def test_manifest_summary_invalidated_on_spec_change(tmp_path, monkeypatch):
+    import prepare as prepare_mod
+    evolve = _manifest_env(tmp_path)
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda s, f: "summary v1")
+    build_manifest(evolve)
+    (Path(evolve) / "spec.md").write_text("- [ ] F01\n- [ ] F99-new\n")
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda s, f: "summary v2")
+    manifest = build_manifest(evolve)
+    assert "summary v2" in manifest            # spec.md edit invalidates
+
+
+def test_manifest_summary_cache_tolerates_wrong_shape(tmp_path, monkeypatch):
+    import prepare as prepare_mod
+    evolve = _manifest_env(tmp_path)
+    (Path(evolve) / "manifest_summary.json").write_text('["not", "a", "dict"]')
+    monkeypatch.setattr(prepare_mod, "_haiku_summarize",
+                        lambda s, f: "fresh summary")
+    manifest = build_manifest(evolve)          # must not raise
+    assert "fresh summary" in manifest
+
+
 # ---------------------------------------------------------------------------
 # _parse_uncompleted_features tests
 # ---------------------------------------------------------------------------

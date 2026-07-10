@@ -844,10 +844,12 @@ def build_manifest(evolve_dir: str) -> str:
     # feature); volatile lock/timing state never enters its inputs. The
     # structured sections above are ALWAYS recomputed — only the LLM call
     # is skipped on a fingerprint hit.
+    spec_path = evolve_path / "spec.md"
     fingerprint_src = json.dumps({
         "round": progress["total_iterations"],
         "phase": progress["phase"],
         "feature": feature,
+        "spec": spec_path.read_text() if spec_path.exists() else "",
         "raw": raw_files,
     }, sort_keys=True)
     fingerprint = hashlib.sha256(fingerprint_src.encode()).hexdigest()
@@ -857,7 +859,8 @@ def build_manifest(evolve_dir: str) -> str:
     if cache_path.exists():
         try:
             cached = json.loads(cache_path.read_text())
-            if cached.get("fingerprint") == fingerprint:
+            if isinstance(cached, dict) and \
+                    cached.get("fingerprint") == fingerprint:
                 summary = cached.get("summary")
         except (json.JSONDecodeError, OSError):
             pass
