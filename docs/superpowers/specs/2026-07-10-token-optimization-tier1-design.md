@@ -82,8 +82,10 @@ summary call is cached:
   summarize and rewrite the cache
 
 **Why safe:** the fingerprint covers every content input the summary
-narrates; volatile lock/timing state never enters the summary's inputs
-and is always recomputed in the structured sections. Worst failure mode
+narrates. Volatile lock/timing state can still reach the summarizer via
+status_text without changing the fingerprint — acceptable because the
+authoritative Status section is always recomputed fresh and sits directly
+above the summary. Worst failure mode
 is a corrupt cache file → one redundant summarize call.
 
 ## Item 3 — Manifest summary on a small model (routing)

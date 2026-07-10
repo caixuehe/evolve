@@ -47,7 +47,6 @@ HELPER_MODEL = os.environ.get(
     "EVOLVE_HELPER_MODEL",
     os.environ.get("EVOLVE_HAIKU_MODEL", "claude-sonnet-4-6"),
 )
-HAIKU_MODEL = HELPER_MODEL  # alias for backward compat — remove once all refs migrated
 # Manifest summary is a <=300-token compression job — small-model work.
 # H's own agent stays on HELPER_MODEL; only this one call routes down.
 MANIFEST_MODEL = os.environ.get(
@@ -850,7 +849,10 @@ def build_manifest(evolve_dir: str) -> str:
         raw_files["run.log (tail)"] = "\n".join(log_lines[-30:])
 
     # Summary caching: the summary narrates raw_files + (round, phase,
-    # feature); volatile lock/timing state never enters its inputs. The
+    # feature). Volatile lock/timing state (build_lock, should_stop) can
+    # reach the summarizer via status_text without changing the
+    # fingerprint — acceptable because the authoritative Status section
+    # directly above is always recomputed fresh. The
     # structured sections above are ALWAYS recomputed — only the LLM call
     # is skipped on a fingerprint hit.
     spec_path = evolve_path / "spec.md"
