@@ -33,6 +33,8 @@ HARD_LIMITS = {
     "max_consecutive_fails": 10,
     "max_flat_after_pivot": 3,
     "max_runtime_hours": 24,
+    "max_branching_rounds_per_feature": 1,
+    "candidates_per_branching": 3,
 }
 
 INDEPENDENT_EVALUATORS = ["agent", "codex", "claude"]

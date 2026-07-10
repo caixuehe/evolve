@@ -940,7 +940,8 @@ def test_hard_limits_keys():
     """HARD_LIMITS has all required keys."""
     expected = {"max_rounds_total", "max_rounds_per_feature",
                 "max_consecutive_crashes", "max_consecutive_fails",
-                "max_flat_after_pivot", "max_runtime_hours"}
+                "max_flat_after_pivot", "max_runtime_hours",
+                "max_branching_rounds_per_feature", "candidates_per_branching"}
     assert set(HARD_LIMITS.keys()) == expected
 
 
