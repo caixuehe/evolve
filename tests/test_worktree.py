@@ -81,3 +81,56 @@ def test_remove_is_idempotent(tmp_path):
     create_feature_worktree(evolve, "F01")
     remove_feature_worktree(evolve, "F01")
     remove_feature_worktree(evolve, "F01")   # second call must not raise
+
+
+from worktree import merge_feature
+
+
+def _commit_in_worktree(wt_path, fname, content, msg):
+    p = Path(wt_path) / fname
+    p.write_text(content)
+    _run(["git", "add", "."], wt_path)
+    _run(["git", "commit", "-m", msg], wt_path)
+
+
+def test_merge_feature_happy_path(tmp_path):
+    evolve = _git_repo(tmp_path)
+    wt = create_feature_worktree(evolve, "F01")
+    _commit_in_worktree(wt["path"], "feature.txt", "done\n", "feat: F01")
+
+    result = merge_feature(evolve, "F01")
+    assert result["status"] == "merged"
+    assert (tmp_path / "feature.txt").exists()      # landed on evolve/demo
+    assert not Path(wt["path"]).exists()            # worktree cleaned up
+
+
+def test_merge_feature_integration_gate_reverts(tmp_path):
+    evolve = _git_repo(tmp_path)
+    wt = create_feature_worktree(evolve, "F01")
+    _commit_in_worktree(wt["path"], "feature.txt", "done\n", "feat: F01")
+
+    head_before = _run(["git", "rev-parse", "HEAD"], tmp_path).stdout.strip()
+    result = merge_feature(evolve, "F01", cascade_stages=[
+        {"name": "smoke", "cmd": "false", "timeout": 10}])
+    assert result["status"] == "gate_fail"
+    head_after = _run(["git", "rev-parse", "HEAD"], tmp_path).stdout.strip()
+    assert head_after == head_before                # merge reverted
+    assert not (tmp_path / "feature.txt").exists()
+    conflict = tmp_path / ".evolve" / "F01" / "merge_conflict.md"
+    assert conflict.exists()
+    assert "smoke" in conflict.read_text()
+
+
+def test_merge_feature_conflict_aborts(tmp_path):
+    evolve = _git_repo(tmp_path)
+    wt = create_feature_worktree(evolve, "F01")
+    _commit_in_worktree(wt["path"], "app.txt", "worktree version\n", "feat")
+    # conflicting change on the base branch
+    (tmp_path / "app.txt").write_text("main version\n")
+    _run(["git", "add", "."], tmp_path)
+    _run(["git", "commit", "-m", "conflicting"], tmp_path)
+
+    result = merge_feature(evolve, "F01")
+    assert result["status"] == "gate_fail"
+    assert (tmp_path / "app.txt").read_text() == "main version\n"
+    assert (tmp_path / ".evolve" / "F01" / "merge_conflict.md").exists()

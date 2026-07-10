@@ -113,3 +113,64 @@ def remove_feature_worktree(evolve_dir: str, feature: str,
             stderr = proc.stderr.strip()
             if "not found" not in stderr.lower():
                 raise RuntimeError(f"git branch -D failed: {stderr}")
+
+
+def _write_merge_conflict(evolve_dir: str, feature: str,
+                          reason: str, detail: str) -> None:
+    feat_dir = Path(evolve_dir) / feature
+    feat_dir.mkdir(parents=True, exist_ok=True)
+    (feat_dir / "merge_conflict.md").write_text(
+        f"# Merge Gate Failure\n\nreason: {reason}\n\n"
+        f"## Detail\n\n```\n{detail}\n```\n"
+    )
+
+
+def merge_feature(evolve_dir: str, feature: str, cascade_stages: list = None,
+                  health_check=None, branch: str = None) -> dict:
+    """Merge a feature branch into the base branch behind the integration
+    gate: after merging, the deterministic cascade re-runs on the merged
+    tree. Gate failure fully reverts the merge.
+
+    branch: source branch override (population branching merges a
+    candidate branch under the parent feature's name). Defaults to the
+    feature's own branch.
+
+    Holds build_lock for the whole merge — the only critical section it
+    still protects.
+
+    Returns {"status": "merged"|"gate_fail"|"locked", "detail": str}.
+    """
+    from prepare import acquire_build_lock, release_build_lock
+    from cascade import run_cascade
+
+    root = _repo_root(evolve_dir)
+    source = branch or feature_branch(evolve_dir, feature)
+
+    bl = acquire_build_lock(evolve_dir)
+    if not bl["acquired"]:
+        return {"status": "locked", "detail": bl["reason"]}
+
+    try:
+        proc = _git(["merge", "--no-ff", "-m",
+                     f"merge: {feature} (evolve integration)", source], root)
+        if proc.returncode != 0:
+            _git(["merge", "--abort"], root)
+            detail = ((proc.stdout or "") + (proc.stderr or ""))[-2000:]
+            _write_merge_conflict(evolve_dir, feature,
+                                  "merge conflict", detail)
+            return {"status": "gate_fail", "detail": detail}
+
+        gate = run_cascade(evolve_dir, feature, cascade_stages or [],
+                           cwd=root, health_check=health_check)
+        if gate["status"] != "passed":
+            _git(["reset", "--hard", "ORIG_HEAD"], root)
+            detail = (f"integration cascade failed at stage "
+                      f"'{gate['failed_stage']}':\n{gate['output_tail']}")
+            _write_merge_conflict(evolve_dir, feature,
+                                  "integration cascade regression", detail)
+            return {"status": "gate_fail", "detail": detail}
+
+        remove_feature_worktree(evolve_dir, feature, delete_branch=True)
+        return {"status": "merged", "detail": ""}
+    finally:
+        release_build_lock(evolve_dir, bl["token"])
